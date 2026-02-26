@@ -117,6 +117,26 @@ export class GitService {
         terminal.show();
     }
 
+    ghCreatePr(base: string, title: string, body: string): string {
+        if (/[;&|`$(){}!<>\\]/.test(base)) {
+            throw new Error(`Branch base inválida: "${base}"`);
+        }
+        const head = this.getCurrentBranch();
+        const safeBase = base.replace(/"/g, '\\"');
+        const safeTitle = title.replace(/"/g, '\\"');
+        const safeBody = body.replace(/"/g, '\\"');
+        const result = execSync(
+            `gh pr create --base "${safeBase}" --head "${head}" --title "${safeTitle}" --body "${safeBody}"`,
+            {
+                cwd: this._workspaceRoot,
+                encoding: 'utf8',
+                timeout: 30000,
+                stdio: 'pipe',
+            },
+        );
+        return result.trim();
+    }
+
     getCurrentBranch(): string {
         return this._exec('git branch --show-current').trim();
     }
