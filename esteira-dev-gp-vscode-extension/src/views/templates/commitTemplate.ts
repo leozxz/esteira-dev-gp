@@ -13,7 +13,6 @@ export interface CommitViewState {
     isGitRepo: boolean;
     workspaceFolders: { name: string; path: string }[];
     selectedFolder: string;
-    hasUpstream: boolean;
 }
 
 const ACCENT_COLOR = '#3b82f6';
@@ -514,9 +513,6 @@ export function getCommitHtml(state: CommitViewState): string {
             <textarea class="commit-textarea" id="commitMessage" placeholder="Descreva suas alterações..."></textarea>
             <div class="commit-actions">
                 <button class="btn-execute" id="commitBtn" ${stagedFiles.length === 0 ? 'disabled' : ''}>Commit</button>
-                ${state.remoteUrl ? `<button class="btn-complete" id="pushBtn">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
-                    Push</button>` : ''}
             </div>
         </div>
     </div>`;
@@ -629,16 +625,6 @@ export function getCommitHtml(state: CommitViewState): string {
             }
             vscode.postMessage({ command: 'commitChanges', message });
         });
-
-        // ── Push ──
-        const pushBtn = document.getElementById('pushBtn');
-        if (pushBtn) {
-            pushBtn.addEventListener('click', () => {
-                pushBtn.disabled = true;
-                pushBtn.textContent = 'Pushing...';
-                vscode.postMessage({ command: 'pushChanges' });
-            });
-        }
 
         // ── Enable/disable commit button based on textarea ──
         const commitBtn = document.getElementById('commitBtn');

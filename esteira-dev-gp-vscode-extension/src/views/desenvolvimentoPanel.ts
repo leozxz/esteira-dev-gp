@@ -9,6 +9,9 @@ import { parseCodeReviewOutput } from '../services/codeReviewParser';
 import { GitService } from '../services/gitService';
 import { getDesenvolvimentoHtml } from './templates/desenvolvimentoTemplate';
 import { getCommitHtml, type CommitViewState } from './templates/commitTemplate';
+import { getPullHtml, type PullViewState } from './templates/pullTemplate';
+import { getPushHtml, type PushViewState } from './templates/pushTemplate';
+import { getPrHtml, type PrViewState } from './templates/prTemplate';
 import { getBaseStyles } from './templates/baseStyles';
 import { buildCsp, getNonce, wrapHtml } from '../utils/htmlHelpers';
 
@@ -113,8 +116,26 @@ export class DesenvolvimentoPanel {
                 case 'ghLogin':
                     this._handleGhLogin();
                     break;
-                case 'pushChanges':
-                    this._handlePush();
+                case 'openPush':
+                    this._handleOpenPush();
+                    break;
+                case 'executePush':
+                    this._handleExecutePush();
+                    break;
+                case 'openPr':
+                    this._handleOpenPr();
+                    break;
+                case 'executePr':
+                    this._handleExecutePr(message.base, message.title, message.body);
+                    break;
+                case 'openPull':
+                    this._handleOpenPull();
+                    break;
+                case 'executePull':
+                    this._handleExecutePull(message.branch);
+                    break;
+                case 'openNovoProjeto':
+                    this._handleNovoProjeto();
                     break;
             }
         });
@@ -372,14 +393,12 @@ export class DesenvolvimentoPanel {
         let branches: string[] = [];
         let files: import('../services/gitService').GitFileStatus[] = [];
         let remoteUrl: string | null = null;
-        let hasUpstream = false;
 
         if (isRepo) {
             try { currentBranch = git.getCurrentBranch(); } catch { /* empty repo */ }
             try { branches = git.getBranches(); } catch { /* empty repo */ }
             try { files = git.getStatus(); } catch { /* empty repo */ }
             try { remoteUrl = git.getRemoteUrl(); } catch { /* no remote */ }
-            try { hasUpstream = git.hasUpstream(); } catch { /* no upstream */ }
         }
 
         const gitUser = git.getGitUser();
@@ -401,7 +420,6 @@ export class DesenvolvimentoPanel {
             isGitRepo: isRepo,
             workspaceFolders,
             selectedFolder,
-            hasUpstream,
         };
     }
 
@@ -566,7 +584,34 @@ export class DesenvolvimentoPanel {
         this._getGitService().ghLogin();
     }
 
-    private _handlePush(): void {
+    // ── Push Handlers ──────────────────────────────────────────
+
+    private _handleOpenPush(): void {
+        this._renderPushView();
+    }
+
+    private _renderPushView(error?: string): void {
+        if (!this._panel) { return; }
+        try {
+            const git = this._getGitService();
+            let currentBranch = '';
+            let hasUpstream = false;
+            let remoteUrl: string | null = null;
+
+            try { currentBranch = git.getCurrentBranch(); } catch { /* empty repo */ }
+            try { remoteUrl = git.getRemoteUrl(); } catch { /* no remote */ }
+            try { hasUpstream = git.hasUpstream(); } catch { /* no upstream */ }
+
+            const state: PushViewState = { currentBranch, hasUpstream, remoteUrl, error };
+            this._panel.webview.html = getPushHtml(state);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const state: PushViewState = { currentBranch: '', hasUpstream: false, remoteUrl: null, error: msg };
+            this._panel.webview.html = getPushHtml(state);
+        }
+    }
+
+    private _handleExecutePush(): void {
         try {
             const git = this._getGitService();
             if (git.hasUpstream()) {
@@ -575,10 +620,128 @@ export class DesenvolvimentoPanel {
                 git.pushSetUpstream();
             }
             vscode.window.showInformationMessage('Push realizado com sucesso!');
-            this._renderCommitView();
+            this._renderPushView();
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            this._renderCommitView(msg);
+            this._renderPushView(msg);
+        }
+    }
+
+    // ── PR Handlers ────────────────────────────────────────────
+
+    private _handleOpenPr(): void {
+        this._renderPrView();
+    }
+
+    private _renderPrView(error?: string): void {
+        if (!this._panel) { return; }
+        try {
+            const git = this._getGitService();
+            let currentBranch = '';
+            let branches: string[] = [];
+            let remoteBranches: string[] = [];
+            let remoteUrl: string | null = null;
+
+            try { git.fetch(); } catch { /* fetch failed */ }
+            try { currentBranch = git.getCurrentBranch(); } catch { /* empty repo */ }
+            try { branches = git.getBranches(); } catch { /* empty repo */ }
+            try { remoteBranches = git.getRemoteBranches(); } catch { /* no remote */ }
+            try { remoteUrl = git.getRemoteUrl(); } catch { /* no remote */ }
+
+            const state: PrViewState = { currentBranch, branches, remoteBranches, remoteUrl, error };
+            this._panel.webview.html = getPrHtml(state);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const state: PrViewState = { currentBranch: '', branches: [], remoteBranches: [], remoteUrl: null, error: msg };
+            this._panel.webview.html = getPrHtml(state);
+        }
+    }
+
+    private _handleExecutePr(base: string, title: string, body: string): void {
+        try {
+            const git = this._getGitService();
+            const prUrl = git.ghCreatePr(base, title, body);
+            vscode.window.showInformationMessage(`PR criado com sucesso! ${prUrl}`);
+            this._renderPrView();
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this._renderPrView(msg);
+        }
+    }
+
+    // ── Pull Handlers ──────────────────────────────────────────
+
+    private _handleOpenPull(): void {
+        this._renderPullView();
+    }
+
+    private _renderPullView(error?: string): void {
+        if (!this._panel) { return; }
+        try {
+            const git = this._getGitService();
+            let currentBranch = '';
+            let remoteBranches: string[] = [];
+
+            try { git.fetch(); } catch { /* fetch failed, continue with cached refs */ }
+            try { currentBranch = git.getCurrentBranch(); } catch { /* empty repo */ }
+            try { remoteBranches = git.getRemoteBranches(); } catch { /* no remote */ }
+
+            const state: PullViewState = { remoteBranches, currentBranch, error };
+            this._panel.webview.html = getPullHtml(state);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const state: PullViewState = { remoteBranches: [], currentBranch: '', error: msg };
+            this._panel.webview.html = getPullHtml(state);
+        }
+    }
+
+    private _handleExecutePull(branch: string): void {
+        try {
+            this._getGitService().pull(branch);
+            vscode.window.showInformationMessage(`Pull de "${branch}" realizado com sucesso!`);
+            this._renderPullView();
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this._renderPullView(msg);
+        }
+    }
+
+    // ── Novo Projeto Handler ─────────────────────────────────────
+
+    private async _handleNovoProjeto(): Promise<void> {
+        const projectName = await vscode.window.showInputBox({
+            prompt: 'Nome do novo projeto',
+            placeHolder: 'meu-projeto',
+            validateInput: (value) => {
+                if (!value.trim()) { return 'Nome não pode ser vazio'; }
+                if (/[<>:"/\\|?*]/.test(value)) { return 'Nome contém caracteres inválidos'; }
+                return undefined;
+            },
+        });
+        if (!projectName) { return; }
+
+        const parentFolders = await vscode.window.showOpenDialog({
+            canSelectFiles: false,
+            canSelectFolders: true,
+            canSelectMany: false,
+            openLabel: 'Selecionar pasta pai',
+            title: 'Onde criar o projeto?',
+        });
+        if (!parentFolders || parentFolders.length === 0) { return; }
+
+        const projectPath = path.join(parentFolders[0].fsPath, projectName.trim());
+
+        try {
+            if (fs.existsSync(projectPath)) {
+                vscode.window.showWarningMessage(`A pasta "${projectName}" já existe nesse local.`);
+                return;
+            }
+            fs.mkdirSync(projectPath, { recursive: true });
+            const uri = vscode.Uri.file(projectPath);
+            await vscode.commands.executeCommand('vscode.openFolder', uri);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            vscode.window.showErrorMessage(`Erro ao criar projeto: ${msg}`);
         }
     }
 
