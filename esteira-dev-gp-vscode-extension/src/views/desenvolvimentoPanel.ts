@@ -9,6 +9,7 @@ import { parseCodeReviewOutput } from '../services/codeReviewParser';
 import { GitService } from '../services/gitService';
 import { getDesenvolvimentoHtml } from './templates/desenvolvimentoTemplate';
 import { getCommitHtml, type CommitViewState } from './templates/commitTemplate';
+import { getPullHtml, type PullViewState } from './templates/pullTemplate';
 import { getBaseStyles } from './templates/baseStyles';
 import { buildCsp, getNonce, wrapHtml } from '../utils/htmlHelpers';
 
@@ -115,6 +116,15 @@ export class DesenvolvimentoPanel {
                     break;
                 case 'pushChanges':
                     this._handlePush();
+                    break;
+                case 'openPull':
+                    this._handleOpenPull();
+                    break;
+                case 'executePull':
+                    this._handleExecutePull(message.branch);
+                    break;
+                case 'openNovoProjeto':
+                    this._handleNovoProjeto();
                     break;
             }
         });
@@ -579,6 +589,82 @@ export class DesenvolvimentoPanel {
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             this._renderCommitView(msg);
+        }
+    }
+
+    // ── Pull Handlers ──────────────────────────────────────────
+
+    private _handleOpenPull(): void {
+        this._renderPullView();
+    }
+
+    private _renderPullView(error?: string): void {
+        if (!this._panel) { return; }
+        try {
+            const git = this._getGitService();
+            let currentBranch = '';
+            let remoteBranches: string[] = [];
+
+            try { git.fetch(); } catch { /* fetch failed, continue with cached refs */ }
+            try { currentBranch = git.getCurrentBranch(); } catch { /* empty repo */ }
+            try { remoteBranches = git.getRemoteBranches(); } catch { /* no remote */ }
+
+            const state: PullViewState = { remoteBranches, currentBranch, error };
+            this._panel.webview.html = getPullHtml(state);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const state: PullViewState = { remoteBranches: [], currentBranch: '', error: msg };
+            this._panel.webview.html = getPullHtml(state);
+        }
+    }
+
+    private _handleExecutePull(branch: string): void {
+        try {
+            this._getGitService().pull(branch);
+            vscode.window.showInformationMessage(`Pull de "${branch}" realizado com sucesso!`);
+            this._renderPullView();
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this._renderPullView(msg);
+        }
+    }
+
+    // ── Novo Projeto Handler ─────────────────────────────────────
+
+    private async _handleNovoProjeto(): Promise<void> {
+        const projectName = await vscode.window.showInputBox({
+            prompt: 'Nome do novo projeto',
+            placeHolder: 'meu-projeto',
+            validateInput: (value) => {
+                if (!value.trim()) { return 'Nome não pode ser vazio'; }
+                if (/[<>:"/\\|?*]/.test(value)) { return 'Nome contém caracteres inválidos'; }
+                return undefined;
+            },
+        });
+        if (!projectName) { return; }
+
+        const parentFolders = await vscode.window.showOpenDialog({
+            canSelectFiles: false,
+            canSelectFolders: true,
+            canSelectMany: false,
+            openLabel: 'Selecionar pasta pai',
+            title: 'Onde criar o projeto?',
+        });
+        if (!parentFolders || parentFolders.length === 0) { return; }
+
+        const projectPath = path.join(parentFolders[0].fsPath, projectName.trim());
+
+        try {
+            if (fs.existsSync(projectPath)) {
+                vscode.window.showWarningMessage(`A pasta "${projectName}" já existe nesse local.`);
+                return;
+            }
+            fs.mkdirSync(projectPath, { recursive: true });
+            const uri = vscode.Uri.file(projectPath);
+            await vscode.commands.executeCommand('vscode.openFolder', uri);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            vscode.window.showErrorMessage(`Erro ao criar projeto: ${msg}`);
         }
     }
 

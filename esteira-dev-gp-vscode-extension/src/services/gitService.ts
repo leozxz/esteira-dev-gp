@@ -210,6 +210,22 @@ export class GitService {
         return this._exec('git diff --cached');
     }
 
+    fetch(): void {
+        this._exec('git fetch');
+    }
+
+    getRemoteBranches(): string[] {
+        const raw = this._exec('git branch -r');
+        return raw
+            .split('\n')
+            .map(b => b.trim())
+            .filter(b => b.length > 0 && !b.includes('->'));
+    }
+
+    pull(branch: string): void {
+        this._exec(`git pull origin ${this._sanitize(branch)}`);
+    }
+
     private _exec(cmd: string): string {
         try {
             return execSync(cmd, {

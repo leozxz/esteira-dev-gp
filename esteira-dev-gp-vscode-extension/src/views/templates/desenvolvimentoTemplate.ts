@@ -8,13 +8,28 @@ export function getDesenvolvimentoHtml(stage: StageInfo): string {
 
     const cards = [
         {
-            id: 'desenvolver',
-            title: 'Desenvolver',
-            description: 'Implementação e codificação das features planejadas.',
-            subtitle: 'Funcionalidade disponível em breve',
-            active: false,
-            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
-            features: [] as { icon: string; label: string }[],
+            id: 'novoProjeto',
+            title: 'Novo Projeto',
+            description: 'Crie uma nova pasta de projeto e abra no VS Code.',
+            subtitle: 'Criar Projeto',
+            active: true,
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>`,
+            features: [
+                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`, label: 'Criar Pasta' },
+                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`, label: 'Abrir VS Code' },
+            ],
+        },
+        {
+            id: 'pull',
+            title: 'Pull',
+            description: 'Atualize seu repositório local com as alterações remotas.',
+            subtitle: 'Fazer Pull',
+            active: true,
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>`,
+            features: [
+                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>`, label: 'Pull' },
+                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>`, label: 'Branches' },
+            ],
         },
         {
             id: 'codereview',
@@ -65,7 +80,7 @@ export function getDesenvolvimentoHtml(stage: StageInfo): string {
     const styles = getBaseStyles(stage.color) + `
         .dev-cards-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            grid-template-columns: repeat(2, 1fr);
             gap: 16px;
         }
 
@@ -220,6 +235,10 @@ export function getDesenvolvimentoHtml(stage: StageInfo): string {
                     vscode.postMessage({ command: 'openCodeReview' });
                 } else if (cardId === 'commit') {
                     vscode.postMessage({ command: 'openCommit' });
+                } else if (cardId === 'pull') {
+                    vscode.postMessage({ command: 'openPull' });
+                } else if (cardId === 'novoProjeto') {
+                    vscode.postMessage({ command: 'openNovoProjeto' });
                 }
             });
         });
