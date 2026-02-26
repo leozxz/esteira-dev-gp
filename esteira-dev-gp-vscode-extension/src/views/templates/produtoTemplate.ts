@@ -3,247 +3,134 @@ import { type ProdutoStep } from '../../data/produtoSteps';
 import { getBaseStyles } from './baseStyles';
 import { buildCsp, getNonce, wrapHtml } from '../../utils/htmlHelpers';
 
-export function getProdutoHtml(stage: StageInfo, steps: ProdutoStep[], totalSteps: number): string {
+export interface ProdutoPipelineState {
+    steps: ProdutoStep[];
+    runningStepId: number | null;
+    completedStepIds: number[];
+    error?: string;
+    jiraPrompt?: boolean;          // true = waiting for Jira project key
+}
+
+function getStatusClass(step: ProdutoStep, state: ProdutoPipelineState): string {
+    if (state.completedStepIds.includes(step.id)) { return 'card-completed'; }
+    if (state.runningStepId === step.id) { return 'card-running'; }
+    return '';
+}
+
+function getStatusBadge(step: ProdutoStep, state: ProdutoPipelineState): string {
+    if (state.completedStepIds.includes(step.id)) {
+        return `<span class="card-badge card-badge-done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> Concluído</span>`;
+    }
+    if (state.runningStepId === step.id) {
+        return `<span class="card-badge card-badge-running"><span class="spinner"></span> Executando…</span>`;
+    }
+    return `<span class="card-badge card-badge-pending">Pendente</span>`;
+}
+
+export function getProdutoHtml(stage: StageInfo, _steps: ProdutoStep[], _totalSteps: number, pipelineState?: ProdutoPipelineState): string {
     const nonce = getNonce();
     const csp = buildCsp(nonce);
 
-    const stepsHtml = steps.map((step, index) => {
-        const isFirst = index === 0;
-        const isLast = index === steps.length - 1;
-        const isJiraStep = step.id === 5;
+    const state: ProdutoPipelineState = pipelineState ?? {
+        steps: _steps,
+        runningStepId: null,
+        completedStepIds: [],
+    };
+    const steps = state.steps.length > 0 ? state.steps : _steps;
 
-        return `
-            <div class="step" data-step="${step.id}" data-status="${isFirst ? 'active' : 'locked'}">
-                <div class="step-indicator">
-                    <div class="step-connector-top ${isFirst ? 'hidden' : ''}"></div>
-                    <div class="step-number">
-                        <span class="step-number-text">${step.id}</span>
-                        <span class="step-check hidden">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                        </span>
-                    </div>
-                    <div class="step-connector-bottom ${isLast ? 'hidden' : ''}"></div>
-                </div>
-                <div class="step-content">
-                    <div class="step-header">
-                        <div class="step-icon">${step.icon}</div>
-                        <div class="step-info">
-                            <h3>${step.title}</h3>
-                            <p>${step.description}</p>
-                        </div>
-                    </div>
-                    <div class="step-actions">
-                        <button class="btn-execute" data-step="${step.id}" ${isJiraStep ? 'data-jira="true"' : ''}>
-                            ${step.buttonLabel}
-                        </button>
-                        <button class="btn-complete" data-step="${step.id}">
-                            Marcar como concluído
-                        </button>
+    const completedCount = state.completedStepIds.length;
+    const totalSteps = steps.length;
+    const progressPct = totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0;
+
+    const errorHtml = state.error
+        ? `<div class="pipeline-error">${state.error.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`
+        : '';
+
+    const cardsHtml = steps.map(step => `
+            <div class="dev-card ${getStatusClass(step, state)}" data-card="${step.id}">
+                <div class="dev-card-icon">${step.icon}</div>
+                <div class="dev-card-body">
+                    <h3>${step.title}</h3>
+                    <p class="dev-card-desc">${step.description}</p>
+                    <div class="dev-card-features">
+                        ${getStatusBadge(step, state)}
                     </div>
                 </div>
-            </div>`;
-    }).join('\n');
+            </div>
+        `).join('\n');
+
+    const allDone = completedCount === totalSteps;
+    const isRunning = state.runningStepId !== null;
 
     const styles = getBaseStyles(stage.color) + `
-        .stepper {
-            display: flex;
-            flex-direction: column;
-            gap: 0;
-        }
-
-        .step {
-            display: flex;
-            gap: 16px;
-            position: relative;
-        }
-
-        .step-indicator {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            flex-shrink: 0;
-            width: 36px;
-        }
-
-        .step-connector-top,
-        .step-connector-bottom {
-            width: 2px;
-            flex: 1;
-            min-height: 12px;
-            background: var(--vscode-panel-border, var(--vscode-widget-border));
-            transition: background 0.3s ease;
-        }
-
-        .step-connector-top.hidden,
-        .step-connector-bottom.hidden {
-            visibility: hidden;
-        }
-
-        .step-number {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
+        .pipeline-toolbar {
             display: flex;
             align-items: center;
-            justify-content: center;
-            font-size: 14px;
-            font-weight: 700;
-            border: 2px solid var(--vscode-panel-border, var(--vscode-widget-border));
-            background: var(--vscode-editor-background);
-            color: var(--vscode-descriptionForeground);
-            transition: all 0.3s ease;
-            flex-shrink: 0;
+            justify-content: space-between;
+            margin-bottom: 20px;
         }
 
-        .step-check {
-            display: flex;
+        .pipeline-start-btn {
+            display: inline-flex;
             align-items: center;
-            justify-content: center;
-        }
-
-        .step-check svg {
-            width: 18px;
-            height: 18px;
-        }
-
-        .hidden {
-            display: none;
-        }
-
-        .step[data-status="active"] .step-number {
-            border-color: ${stage.color};
-            background: color-mix(in srgb, ${stage.color} 15%, transparent);
-            color: ${stage.color};
-        }
-
-        .step[data-status="completed"] .step-number {
-            border-color: #10b981;
-            background: #10b981;
-            color: white;
-        }
-
-        .step[data-status="completed"] .step-number .step-number-text {
-            display: none;
-        }
-
-        .step[data-status="completed"] .step-number .step-check {
-            display: flex;
-        }
-
-        .step[data-status="completed"] .step-connector-top,
-        .step[data-status="completed"] .step-connector-bottom {
-            background: #10b981;
-        }
-
-        .step[data-status="active"] .step-connector-top {
-            background: #10b981;
-        }
-
-        .step[data-status="locked"] .step-content {
-            opacity: 0.5;
-        }
-
-        .step[data-status="locked"] .btn-execute,
-        .step[data-status="locked"] .btn-complete {
-            pointer-events: none;
-            opacity: 0.4;
-        }
-
-        .step-content {
-            flex: 1;
-            padding-bottom: 24px;
-            transition: opacity 0.3s ease;
-        }
-
-        .step-header {
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-            margin-bottom: 12px;
-        }
-
-        .step-icon {
-            width: 32px;
-            height: 32px;
-            flex-shrink: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 8px;
-            background: color-mix(in srgb, ${stage.color} 10%, transparent);
-            padding: 6px;
-        }
-
-        .step-icon svg {
-            width: 20px;
-            height: 20px;
-            stroke: ${stage.color};
-        }
-
-        .step-info h3 {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-
-        .step-info p {
-            font-size: 12px;
-            color: var(--vscode-descriptionForeground);
-            line-height: 1.5;
-        }
-
-        .step-actions {
-            display: flex;
             gap: 8px;
-            margin-top: 12px;
-        }
-
-        .btn-execute {
-            padding: 6px 14px;
+            padding: 10px 24px;
             border: none;
-            border-radius: 4px;
-            font-size: 12px;
+            border-radius: 6px;
+            font-size: 13px;
             font-weight: 600;
             cursor: pointer;
             background: ${stage.color};
             color: #fff;
             font-family: inherit;
-            transition: opacity 0.15s ease;
+            transition: opacity 0.15s ease, transform 0.1s ease;
         }
 
-        .btn-execute:hover {
-            opacity: 0.85;
+        .pipeline-start-btn:hover { opacity: 0.85; }
+        .pipeline-start-btn:active { transform: scale(0.97); }
+
+        .pipeline-start-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
         }
 
-        .btn-complete {
-            padding: 6px 14px;
+        .pipeline-start-btn:disabled:hover { opacity: 0.4; }
+        .pipeline-start-btn:disabled:active { transform: none; }
+
+        .pipeline-start-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .pipeline-reset-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
             border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
-            border-radius: 4px;
-            font-size: 12px;
+            border-radius: 6px;
+            font-size: 13px;
             font-weight: 500;
             cursor: pointer;
             background: transparent;
             color: var(--vscode-foreground);
             font-family: inherit;
-            transition: all 0.15s ease;
+            transition: border-color 0.15s ease, background 0.15s ease;
         }
 
-        .btn-complete:hover {
+        .pipeline-reset-btn:hover {
+            border-color: ${stage.color};
             background: var(--vscode-list-hoverBackground);
         }
 
-        .step[data-status="completed"] .btn-execute {
-            display: none;
+        .pipeline-reset-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
         }
 
-        .step[data-status="completed"] .btn-complete {
-            border-color: #10b981;
-            color: #10b981;
-            pointer-events: none;
-        }
-
-        .step[data-status="completed"] .btn-complete::before {
-            content: "\\2713  ";
+        .pipeline-reset-btn svg {
+            width: 14px;
+            height: 14px;
         }
 
         .progress-bar {
@@ -254,24 +141,161 @@ export function getProdutoHtml(stage: StageInfo, steps: ProdutoStep[], totalStep
             border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
         }
 
-        .progress-bar .progress-text {
+        .progress-text {
             font-size: 12px;
             color: var(--vscode-descriptionForeground);
             margin-bottom: 8px;
         }
 
-        .progress-bar .progress-track {
+        .progress-track {
             height: 4px;
             border-radius: 2px;
             background: var(--vscode-panel-border, var(--vscode-widget-border));
             overflow: hidden;
         }
 
-        .progress-bar .progress-fill {
+        .progress-fill {
             height: 100%;
             border-radius: 2px;
             background: ${stage.color};
             transition: width 0.4s ease;
+        }
+
+        .dev-cards-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+        }
+
+        .dev-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            padding: 28px 20px;
+            border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
+            border-radius: 10px;
+            background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+            transition: border-color 0.3s ease, opacity 0.3s ease;
+        }
+
+        .dev-card-icon {
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            background: color-mix(in srgb, ${stage.color} 12%, transparent);
+            padding: 10px;
+            margin-bottom: 16px;
+        }
+
+        .dev-card-icon svg {
+            width: 28px;
+            height: 28px;
+            stroke: ${stage.color};
+        }
+
+        .dev-card-body h3 {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .dev-card-desc {
+            font-size: 12px;
+            color: var(--vscode-descriptionForeground);
+            line-height: 1.5;
+            margin-bottom: 14px;
+        }
+
+        .dev-card-features {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        /* Status card styles */
+        .card-completed {
+            border-color: #10b981;
+        }
+
+        .card-completed .dev-card-icon {
+            background: color-mix(in srgb, #10b981 12%, transparent);
+        }
+
+        .card-completed .dev-card-icon svg {
+            stroke: #10b981;
+        }
+
+        .card-running {
+            border-color: ${stage.color};
+            box-shadow: 0 0 0 1px color-mix(in srgb, ${stage.color} 30%, transparent);
+        }
+
+        /* Badges */
+        .card-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        }
+
+        .card-badge svg {
+            width: 12px;
+            height: 12px;
+        }
+
+        .card-badge-done {
+            background: #10b98122;
+            color: #10b981;
+        }
+
+        .card-badge-running {
+            background: color-mix(in srgb, ${stage.color} 15%, transparent);
+            color: ${stage.color};
+        }
+
+        .card-badge-pending {
+            background: var(--vscode-badge-background, rgba(255,255,255,0.08));
+            color: var(--vscode-badge-foreground, var(--vscode-descriptionForeground));
+        }
+
+        .spinner {
+            width: 10px;
+            height: 10px;
+            border: 2px solid color-mix(in srgb, ${stage.color} 30%, transparent);
+            border-top-color: ${stage.color};
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .pipeline-error {
+            padding: 12px 16px;
+            border-radius: 8px;
+            background: #cb243615;
+            color: #cb2436;
+            font-size: 12px;
+            margin-bottom: 16px;
+        }
+
+        .pipeline-done-msg {
+            text-align: center;
+            padding: 16px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #10b981;
         }
     `;
 
@@ -284,75 +308,52 @@ export function getProdutoHtml(stage: StageInfo, steps: ProdutoStep[], totalStep
         </div>
     </div>
 
+    <div class="pipeline-toolbar">
+        <button class="pipeline-start-btn" id="startPipelineBtn" ${isRunning || allDone ? 'disabled' : ''}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            ${allDone ? 'Pipeline concluída' : isRunning ? 'Executando…' : 'Iniciar Pipeline'}
+        </button>
+        ${completedCount > 0 ? `<button class="pipeline-reset-btn" id="resetPipelineBtn" ${isRunning ? 'disabled' : ''}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            Resetar Pipeline
+        </button>` : ''}
+    </div>
+
     <div class="progress-bar">
-        <div class="progress-text"><span id="progressCount">0</span> de ${totalSteps} etapas concluídas</div>
+        <div class="progress-text"><span id="progressCount">${completedCount}</span> de ${totalSteps} etapas concluídas</div>
         <div class="progress-track">
-            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            <div class="progress-fill" id="progressFill" style="width: ${progressPct}%"></div>
         </div>
     </div>
 
-    <div class="stepper">
-        ${stepsHtml}
-    </div>`;
+    ${errorHtml}
+
+    <div class="dev-cards-grid">
+        ${cardsHtml}
+    </div>
+
+    ${allDone ? '<div class="pipeline-done-msg">Pipeline de Produto concluída com sucesso!</div>' : ''}`;
 
     const script = `
         const vscodeApi = acquireVsCodeApi();
-        const totalSteps = ${totalSteps};
 
-        let state = {
-            currentStep: 1,
-            completedSteps: []
-        };
+        document.getElementById('startPipelineBtn').addEventListener('click', () => {
+            vscodeApi.postMessage({ command: 'startPipeline' });
+        });
 
-        function updateUI() {
-            const steps = document.querySelectorAll('.step');
-            steps.forEach(stepEl => {
-                const stepNum = parseInt(stepEl.getAttribute('data-step'));
-                if (state.completedSteps.includes(stepNum)) {
-                    stepEl.setAttribute('data-status', 'completed');
-                } else if (stepNum === state.currentStep) {
-                    stepEl.setAttribute('data-status', 'active');
-                } else if (stepNum < state.currentStep) {
-                    stepEl.setAttribute('data-status', 'active');
-                } else {
-                    stepEl.setAttribute('data-status', 'locked');
-                }
+        const resetBtn = document.getElementById('resetPipelineBtn');
+        if (resetBtn) {
+            resetBtn.addEventListener('click', () => {
+                vscodeApi.postMessage({ command: 'resetPipeline' });
             });
-
-            const completedCount = state.completedSteps.length;
-            document.getElementById('progressCount').textContent = completedCount;
-            document.getElementById('progressFill').style.width = (completedCount / totalSteps * 100) + '%';
         }
 
-        document.querySelectorAll('.btn-execute').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const stepNum = parseInt(btn.getAttribute('data-step'));
-                const isJira = btn.getAttribute('data-jira') === 'true';
-                if (isJira) {
-                    vscodeApi.postMessage({ command: 'openJiraDialog', stepNumber: stepNum });
-                } else {
-                    vscodeApi.postMessage({ command: 'executeStep', stepNumber: stepNum });
-                }
-            });
-        });
-
-        document.querySelectorAll('.btn-complete').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const stepNum = parseInt(btn.getAttribute('data-step'));
-                vscodeApi.postMessage({ command: 'markStepComplete', stepNumber: stepNum });
-            });
-        });
-
         window.addEventListener('message', event => {
-            const message = event.data;
-            if (message.command === 'updateState') {
-                state.currentStep = message.currentStep;
-                state.completedSteps = message.completedSteps;
-                updateUI();
+            const msg = event.data;
+            if (msg.command === 'pipelineUpdate') {
+                // Full re-render is handled by the panel, no incremental update needed
             }
         });
-
-        updateUI();
     `;
 
     return wrapHtml({ csp, styles, body, script, nonce, title: 'Esteira - Produto' });
