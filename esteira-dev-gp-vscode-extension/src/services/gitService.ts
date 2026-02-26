@@ -1,0 +1,215 @@
+import { execSync } from 'child_process';
+import * as vscode from 'vscode';
+
+export interface GitFileStatus {
+    file: string;
+    status: string;      // M, A, D, R, ??
+    staged: boolean;
+}
+
+export class GitService {
+    private _workspaceRoot: string;
+
+    constructor(workspaceRoot?: string) {
+        this._workspaceRoot = workspaceRoot ?? this._getDefaultWorkspaceRoot();
+    }
+
+    get workspaceRoot(): string {
+        return this._workspaceRoot;
+    }
+
+    private _getDefaultWorkspaceRoot(): string {
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders || folders.length === 0) {
+            throw new Error('Nenhum workspace aberto.');
+        }
+        return folders[0].uri.fsPath;
+    }
+
+    getWorkspaceRoot(): string {
+        return this._workspaceRoot;
+    }
+
+    // ── Repo & User Info ──────────────────────────────────────────
+
+    getGitUser(): { name: string; email: string } {
+        let name = '';
+        let email = '';
+        try { name = this._exec('git config user.name').trim(); } catch { /* not configured */ }
+        try { email = this._exec('git config user.email').trim(); } catch { /* not configured */ }
+        return { name, email };
+    }
+
+    isGitRepo(): boolean {
+        try {
+            this._exec('git rev-parse --is-inside-work-tree');
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    initRepo(): void {
+        this._exec('git init');
+    }
+
+    getRemoteUrl(): string | null {
+        try {
+            const url = this._exec('git remote get-url origin').trim();
+            return url || null;
+        } catch {
+            return null;
+        }
+    }
+
+    addRemote(url: string): void {
+        if (/[;&|`$(){}!<>\\]/.test(url)) {
+            throw new Error(`URL inválida: "${url}"`);
+        }
+        this._exec(`git remote add origin "${url.replace(/"/g, '\\"')}"`);
+    }
+
+    // ── GitHub CLI ────────────────────────────────────────────────
+
+    isGhAuthenticated(): boolean {
+        try {
+            execSync('gh auth status', {
+                cwd: this._workspaceRoot,
+                encoding: 'utf8',
+                timeout: 10000,
+                stdio: 'pipe',
+            });
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    ghGetUser(): string | null {
+        try {
+            const login = execSync('gh api user -q .login', {
+                cwd: this._workspaceRoot,
+                encoding: 'utf8',
+                timeout: 10000,
+                stdio: 'pipe',
+            }).trim();
+            return login || null;
+        } catch {
+            return null;
+        }
+    }
+
+    ghCreateRepo(name: string, isPrivate: boolean): void {
+        if (/[;&|`$(){}!<>\\]/.test(name)) {
+            throw new Error(`Nome de repositório inválido: "${name}"`);
+        }
+        const visibility = isPrivate ? '--private' : '--public';
+        execSync(`gh repo create "${name.replace(/"/g, '\\"')}" ${visibility} --source=. --push`, {
+            cwd: this._workspaceRoot,
+            encoding: 'utf8',
+            timeout: 30000,
+        });
+    }
+
+    ghLogin(): void {
+        const terminal = vscode.window.createTerminal({ name: 'GitHub Login', cwd: this._workspaceRoot });
+        terminal.sendText('gh auth login');
+        terminal.show();
+    }
+
+    getCurrentBranch(): string {
+        return this._exec('git branch --show-current').trim();
+    }
+
+    getBranches(): string[] {
+        const raw = this._exec('git branch --list');
+        return raw
+            .split('\n')
+            .map(b => b.replace(/^\*?\s+/, '').trim())
+            .filter(b => b.length > 0);
+    }
+
+    switchBranch(name: string): void {
+        this._exec(`git switch ${this._sanitize(name)}`);
+    }
+
+    createBranch(name: string): void {
+        this._exec(`git switch -c ${this._sanitize(name)}`);
+    }
+
+    getStatus(): GitFileStatus[] {
+        const raw = this._exec('git status --porcelain');
+        if (!raw.trim()) { return []; }
+
+        return raw.split('\n').filter(l => l.length > 0).map(line => {
+            const indexStatus = line[0];
+            const workTreeStatus = line[1];
+            const file = line.substring(3).trim();
+
+            // If index has a letter (not space/?) → staged
+            const staged = indexStatus !== ' ' && indexStatus !== '?';
+            // Determine displayed status
+            let status: string;
+            if (staged) {
+                status = indexStatus === '?' ? '??' : indexStatus;
+            } else {
+                status = workTreeStatus === '?' ? '??' : workTreeStatus;
+            }
+
+            return { file, status, staged };
+        });
+    }
+
+    stageFile(file: string): void {
+        this._exec(`git add -- ${this._sanitize(file)}`);
+    }
+
+    unstageFile(file: string): void {
+        this._exec(`git restore --staged -- ${this._sanitize(file)}`);
+    }
+
+    stageAll(): void {
+        this._exec('git add -A');
+    }
+
+    unstageAll(): void {
+        this._exec('git reset HEAD');
+    }
+
+    commit(message: string): void {
+        if (!message.trim()) {
+            throw new Error('Mensagem de commit não pode ser vazia.');
+        }
+        // Use stdin to avoid shell escaping issues with the message
+        execSync('git commit -F -', {
+            cwd: this._workspaceRoot,
+            encoding: 'utf8',
+            input: message,
+        });
+    }
+
+    getDiffCached(): string {
+        return this._exec('git diff --cached');
+    }
+
+    private _exec(cmd: string): string {
+        try {
+            return execSync(cmd, {
+                cwd: this._workspaceRoot,
+                encoding: 'utf8',
+                timeout: 10000,
+            });
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            throw new Error(`Erro ao executar "${cmd}": ${msg}`);
+        }
+    }
+
+    private _sanitize(value: string): string {
+        // Prevent shell injection: only allow safe branch/file name characters
+        if (/[;&|`$(){}!<>\\]/.test(value)) {
+            throw new Error(`Valor inválido: "${value}"`);
+        }
+        return `"${value.replace(/"/g, '\\"')}"`;
+    }
+}
