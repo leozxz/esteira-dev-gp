@@ -180,12 +180,30 @@ export class GitService {
         if (!message.trim()) {
             throw new Error('Mensagem de commit não pode ser vazia.');
         }
-        // Use stdin to avoid shell escaping issues with the message
         execSync('git commit -F -', {
             cwd: this._workspaceRoot,
             encoding: 'utf8',
             input: message,
+            maxBuffer: 10 * 1024 * 1024,
         });
+    }
+
+    push(): void {
+        this._exec('git push');
+    }
+
+    pushSetUpstream(): void {
+        const branch = this.getCurrentBranch();
+        this._exec(`git push -u origin ${this._sanitize(branch)}`);
+    }
+
+    hasUpstream(): boolean {
+        try {
+            this._exec('git rev-parse --abbrev-ref @{u}');
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     getDiffCached(): string {
@@ -197,7 +215,8 @@ export class GitService {
             return execSync(cmd, {
                 cwd: this._workspaceRoot,
                 encoding: 'utf8',
-                timeout: 10000,
+                timeout: 30000,
+                maxBuffer: 10 * 1024 * 1024, // 10MB
             });
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);

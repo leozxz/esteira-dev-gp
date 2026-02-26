@@ -13,6 +13,7 @@ export interface CommitViewState {
     isGitRepo: boolean;
     workspaceFolders: { name: string; path: string }[];
     selectedFolder: string;
+    hasUpstream: boolean;
 }
 
 const ACCENT_COLOR = '#3b82f6';
@@ -283,13 +284,6 @@ export function getCommitHtml(state: CommitViewState): string {
             font-size: 11px;
         }
 
-        .btn-ai {
-            background: linear-gradient(135deg, #8b5cf6, #6366f1);
-            border: none;
-            color: #fff;
-        }
-        .btn-ai:hover { opacity: 0.85; }
-
         /* ── Back ── */
         .back-link {
             display: inline-flex;
@@ -401,24 +395,6 @@ export function getCommitHtml(state: CommitViewState): string {
             display: flex;
         }
 
-        /* ── Loading Indicator ── */
-        .ai-loading {
-            display: none;
-            align-items: center;
-            gap: 8px;
-            font-size: 12px;
-            color: var(--vscode-descriptionForeground);
-            margin-top: 8px;
-        }
-        .ai-loading.visible { display: flex; }
-        .ai-spinner {
-            width: 14px; height: 14px;
-            border: 2px solid color-mix(in srgb, ${ACCENT_COLOR} 20%, transparent);
-            border-top-color: ${ACCENT_COLOR};
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
     `;
 
     const errorHtml = state.error
@@ -536,16 +512,11 @@ export function getCommitHtml(state: CommitViewState): string {
                 Mensagem de Commit
             </div>
             <textarea class="commit-textarea" id="commitMessage" placeholder="Descreva suas alterações..."></textarea>
-            <div class="ai-loading" id="aiLoading">
-                <div class="ai-spinner"></div>
-                Gerando mensagem com IA...
-            </div>
             <div class="commit-actions">
-                <button class="btn-execute btn-small btn-ai" id="generateMsgBtn">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-                    Gerar com IA
-                </button>
                 <button class="btn-execute" id="commitBtn" ${stagedFiles.length === 0 ? 'disabled' : ''}>Commit</button>
+                ${state.remoteUrl ? `<button class="btn-complete" id="pushBtn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;vertical-align:middle;margin-right:4px"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+                    Push</button>` : ''}
             </div>
         </div>
     </div>`;
@@ -659,26 +630,15 @@ export function getCommitHtml(state: CommitViewState): string {
             vscode.postMessage({ command: 'commitChanges', message });
         });
 
-        // ── AI Generate ──
-        document.getElementById('generateMsgBtn').addEventListener('click', () => {
-            document.getElementById('aiLoading').classList.add('visible');
-            document.getElementById('generateMsgBtn').disabled = true;
-            vscode.postMessage({ command: 'generateCommitMessage' });
-        });
-
-        // ── Receive messages from extension ──
-        window.addEventListener('message', (event) => {
-            const msg = event.data;
-            if (msg.command === 'setCommitMessage') {
-                document.getElementById('commitMessage').value = msg.message;
-                document.getElementById('aiLoading').classList.remove('visible');
-                document.getElementById('generateMsgBtn').disabled = false;
-            }
-            if (msg.command === 'aiError') {
-                document.getElementById('aiLoading').classList.remove('visible');
-                document.getElementById('generateMsgBtn').disabled = false;
-            }
-        });
+        // ── Push ──
+        const pushBtn = document.getElementById('pushBtn');
+        if (pushBtn) {
+            pushBtn.addEventListener('click', () => {
+                pushBtn.disabled = true;
+                pushBtn.textContent = 'Pushing...';
+                vscode.postMessage({ command: 'pushChanges' });
+            });
+        }
 
         // ── Enable/disable commit button based on textarea ──
         const commitBtn = document.getElementById('commitBtn');

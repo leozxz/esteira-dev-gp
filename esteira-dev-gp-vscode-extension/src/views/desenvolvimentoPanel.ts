@@ -113,6 +113,9 @@ export class DesenvolvimentoPanel {
                 case 'ghLogin':
                     this._handleGhLogin();
                     break;
+                case 'pushChanges':
+                    this._handlePush();
+                    break;
             }
         });
 
@@ -369,12 +372,14 @@ export class DesenvolvimentoPanel {
         let branches: string[] = [];
         let files: import('../services/gitService').GitFileStatus[] = [];
         let remoteUrl: string | null = null;
+        let hasUpstream = false;
 
         if (isRepo) {
             try { currentBranch = git.getCurrentBranch(); } catch { /* empty repo */ }
             try { branches = git.getBranches(); } catch { /* empty repo */ }
             try { files = git.getStatus(); } catch { /* empty repo */ }
             try { remoteUrl = git.getRemoteUrl(); } catch { /* no remote */ }
+            try { hasUpstream = git.hasUpstream(); } catch { /* no upstream */ }
         }
 
         const gitUser = git.getGitUser();
@@ -396,6 +401,7 @@ export class DesenvolvimentoPanel {
             isGitRepo: isRepo,
             workspaceFolders,
             selectedFolder,
+            hasUpstream,
         };
     }
 
@@ -418,6 +424,7 @@ export class DesenvolvimentoPanel {
                 isGitRepo: false,
                 workspaceFolders: folders.map(f => ({ name: f.name, path: f.uri.fsPath })),
                 selectedFolder: this._selectedFolder ?? (folders[0]?.uri.fsPath ?? ''),
+                hasUpstream: false,
             });
         }
     }
@@ -557,6 +564,22 @@ export class DesenvolvimentoPanel {
 
     private _handleGhLogin(): void {
         this._getGitService().ghLogin();
+    }
+
+    private _handlePush(): void {
+        try {
+            const git = this._getGitService();
+            if (git.hasUpstream()) {
+                git.push();
+            } else {
+                git.pushSetUpstream();
+            }
+            vscode.window.showInformationMessage('Push realizado com sucesso!');
+            this._renderCommitView();
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this._renderCommitView(msg);
+        }
     }
 
     private _handleCommit(message: string): void {
