@@ -45,6 +45,11 @@ export class DeployPanel {
                 case 'executeMerge':
                     this._handleMergePr(message.prNumber, message.method);
                     break;
+                case 'openConflictUrl':
+                    if (message.url) {
+                        vscode.env.openExternal(vscode.Uri.parse(message.url));
+                    }
+                    break;
                 case 'backToMenu':
                     this._showMenu();
                     break;

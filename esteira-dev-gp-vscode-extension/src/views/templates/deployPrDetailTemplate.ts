@@ -165,7 +165,11 @@ export function getDeployPrDetailHtml(state: DeployPrDetailState): string {
     } else if (pr.isDraft) {
         mergeHint = `<p class="merge-hint">Este PR é um draft. Marque como pronto antes de fazer merge.</p>`;
     } else if (pr.mergeable === 'CONFLICTING') {
-        mergeHint = `<p class="merge-hint">Existem conflitos que precisam ser resolvidos antes do merge.</p>`;
+        mergeHint = `<p class="merge-hint">Existem conflitos que precisam ser resolvidos antes do merge.</p>
+            <button class="resolve-conflicts-btn" id="resolveConflictsBtn" data-url="${escapeHtml(pr.url)}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                Resolve conflicts
+            </button>`;
     } else if (pr.mergeable === 'UNKNOWN') {
         mergeHint = `<p class="merge-hint">O status de merge ainda está sendo calculado.</p>`;
     }
@@ -405,6 +409,33 @@ export function getDeployPrDetailHtml(state: DeployPrDetailState): string {
             margin-bottom: 8px;
         }
 
+        .resolve-conflicts-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 8px;
+            padding: 8px 16px;
+            border: 1px solid #e36000;
+            border-radius: 6px;
+            background: #e3600018;
+            color: #e36000;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .resolve-conflicts-btn:hover {
+            background: #e3600030;
+        }
+
+        .resolve-conflicts-btn svg {
+            width: 14px;
+            height: 14px;
+            stroke: #e36000;
+        }
+
         .pr-error {
             padding: 16px;
             border-radius: 8px;
@@ -442,6 +473,14 @@ export function getDeployPrDetailHtml(state: DeployPrDetailState): string {
             mergeBtn.addEventListener('click', () => {
                 const method = document.getElementById('mergeMethod').value;
                 vscode.postMessage({ command: 'executeMerge', prNumber: ${pr.number}, method });
+            });
+        }
+
+        const resolveBtn = document.getElementById('resolveConflictsBtn');
+        if (resolveBtn) {
+            resolveBtn.addEventListener('click', () => {
+                const url = resolveBtn.getAttribute('data-url');
+                vscode.postMessage({ command: 'openConflictUrl', url: url + '/conflicts' });
             });
         }
     `;
