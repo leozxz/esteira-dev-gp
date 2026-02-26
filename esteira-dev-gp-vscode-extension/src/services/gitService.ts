@@ -7,6 +7,58 @@ export interface GitFileStatus {
     staged: boolean;
 }
 
+// ── PR-related interfaces ───────────────────────────────────
+
+export interface GhPrListItem {
+    number: number;
+    title: string;
+    author: string;
+    baseRefName: string;
+    headRefName: string;
+    isDraft: boolean;
+    state: string;          // OPEN, CLOSED, MERGED
+    labels: string[];
+    reviewDecision: string; // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, ''
+    url: string;
+}
+
+export interface GhPrComment {
+    author: string;
+    body: string;
+    createdAt: string;
+}
+
+export interface GhPrReview {
+    author: string;
+    body: string;
+    state: string;   // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, PENDING
+    createdAt: string;
+}
+
+export interface GhStatusCheck {
+    name: string;
+    status: string;      // COMPLETED, IN_PROGRESS, QUEUED, etc.
+    conclusion: string;  // SUCCESS, FAILURE, NEUTRAL, etc.
+}
+
+export interface GhPrDetail {
+    number: number;
+    title: string;
+    body: string;
+    author: string;
+    baseRefName: string;
+    headRefName: string;
+    isDraft: boolean;
+    state: string;
+    labels: string[];
+    reviewDecision: string;
+    url: string;
+    mergeable: string;   // MERGEABLE, CONFLICTING, UNKNOWN
+    statusCheckRollup: GhStatusCheck[];
+    comments: GhPrComment[];
+    reviews: GhPrReview[];
+}
+
 export class GitService {
     private _workspaceRoot: string;
 
@@ -244,6 +296,86 @@ export class GitService {
 
     pull(branch: string): void {
         this._exec(`git pull origin ${this._sanitize(branch)}`);
+    }
+
+    // ── GitHub PR Operations ────────────────────────────────────
+
+    ghListPrs(): GhPrListItem[] {
+        const fields = 'number,title,author,baseRefName,headRefName,isDraft,state,labels,reviewDecision,url';
+        const raw = execSync(
+            `gh pr list --json ${fields} --limit 30`,
+            { cwd: this._workspaceRoot, encoding: 'utf8', timeout: 30000, stdio: 'pipe' },
+        );
+        const parsed = JSON.parse(raw);
+        return (parsed as Array<Record<string, unknown>>).map(pr => ({
+            number: pr.number as number,
+            title: pr.title as string,
+            author: ((pr.author as Record<string, string>)?.login) ?? 'unknown',
+            baseRefName: pr.baseRefName as string,
+            headRefName: pr.headRefName as string,
+            isDraft: pr.isDraft as boolean,
+            state: pr.state as string,
+            labels: ((pr.labels as Array<Record<string, string>>) ?? []).map(l => l.name),
+            reviewDecision: (pr.reviewDecision as string) ?? '',
+            url: pr.url as string,
+        }));
+    }
+
+    ghGetPrDetail(prNumber: number): GhPrDetail {
+        if (!Number.isInteger(prNumber) || prNumber <= 0) {
+            throw new Error(`Número de PR inválido: ${prNumber}`);
+        }
+        const fields = 'number,title,body,author,baseRefName,headRefName,isDraft,state,labels,reviewDecision,url,mergeable,statusCheckRollup,comments,reviews';
+        const raw = execSync(
+            `gh pr view ${prNumber} --json ${fields}`,
+            { cwd: this._workspaceRoot, encoding: 'utf8', timeout: 30000, stdio: 'pipe' },
+        );
+        const pr = JSON.parse(raw) as Record<string, unknown>;
+        return {
+            number: pr.number as number,
+            title: pr.title as string,
+            body: (pr.body as string) ?? '',
+            author: ((pr.author as Record<string, string>)?.login) ?? 'unknown',
+            baseRefName: pr.baseRefName as string,
+            headRefName: pr.headRefName as string,
+            isDraft: pr.isDraft as boolean,
+            state: pr.state as string,
+            labels: ((pr.labels as Array<Record<string, string>>) ?? []).map(l => l.name),
+            reviewDecision: (pr.reviewDecision as string) ?? '',
+            url: pr.url as string,
+            mergeable: (pr.mergeable as string) ?? 'UNKNOWN',
+            statusCheckRollup: ((pr.statusCheckRollup as Array<Record<string, string>>) ?? []).map(c => ({
+                name: c.name ?? c.context ?? 'check',
+                status: c.status ?? '',
+                conclusion: c.conclusion ?? '',
+            })),
+            comments: ((pr.comments as Array<Record<string, unknown>>) ?? []).map(c => ({
+                author: ((c.author as Record<string, string>)?.login) ?? 'unknown',
+                body: (c.body as string) ?? '',
+                createdAt: (c.createdAt as string) ?? '',
+            })),
+            reviews: ((pr.reviews as Array<Record<string, unknown>>) ?? []).map(r => ({
+                author: ((r.author as Record<string, string>)?.login) ?? 'unknown',
+                body: (r.body as string) ?? '',
+                state: (r.state as string) ?? '',
+                createdAt: (r.submittedAt as string) ?? (r.createdAt as string) ?? '',
+            })),
+        };
+    }
+
+    ghMergePr(prNumber: number, method: 'merge' | 'squash' | 'rebase'): string {
+        if (!Number.isInteger(prNumber) || prNumber <= 0) {
+            throw new Error(`Número de PR inválido: ${prNumber}`);
+        }
+        const allowedMethods = ['merge', 'squash', 'rebase'];
+        if (!allowedMethods.includes(method)) {
+            throw new Error(`Método de merge inválido: ${method}`);
+        }
+        const result = execSync(
+            `gh pr merge ${prNumber} --${method}`,
+            { cwd: this._workspaceRoot, encoding: 'utf8', timeout: 30000, stdio: 'pipe' },
+        );
+        return result.trim();
     }
 
     private _exec(cmd: string): string {
