@@ -118,6 +118,15 @@ export class GitFlowService {
     async createBranch(type: string, cardNumber: string): Promise<CreateBranchResult> {
         const project = this._getProjectCode();
         const branchName = `${type}/${project}-${cardNumber}`;
+        return this._doCreateBranch(branchName);
+    }
+
+    async createBranchFromJira(type: string, issueKey: string): Promise<CreateBranchResult> {
+        const branchName = `${type}/${issueKey.toLowerCase()}`;
+        return this._doCreateBranch(branchName);
+    }
+
+    private async _doCreateBranch(branchName: string): Promise<CreateBranchResult> {
         const steps: StepInfo[] = [];
 
         try {
@@ -170,7 +179,7 @@ export class GitFlowService {
             const project = this._getProjectCode();
             const cardMatch = currentBranch.match(new RegExp(`${project}-(\\d+)`, 'i'));
             const cardNum = cardMatch ? cardMatch[1] : 'xxxx';
-            const mergeBranch = `merge/${project}-${cardNum}`;
+            const mergeBranch = `merge/${project}-${cardNum}-hml`;
 
             if (!conflicts) {
                 return {
@@ -212,29 +221,25 @@ export class GitFlowService {
 
             await this._runGit('fetch origin');
 
-            const isHotfix = currentBranch.startsWith('hotfix/');
-            if (!isHotfix) {
-                const mergedInHml = await this._isMergedInto(currentBranch, 'hml');
-                if (!mergedInHml) {
-                    return {
-                        success: false, wasInHml: false,
-                        message: `BLOQUEADO: ${currentBranch} ainda não foi mergeada em hml.`,
-                        suggestion: 'Fluxo obrigatório: feat/ → PR → hml → validação → PR → main.\nMergeie em hml primeiro e valide o ambiente de homologação.',
-                    };
-                }
+            const alreadyMerged = await this._isMergedInto(currentBranch, 'main');
+            if (alreadyMerged) {
+                return {
+                    success: true, alreadyMerged: true, hasConflicts: false,
+                    message: `A branch ${currentBranch} já está presente em main.`,
+                };
             }
 
             const conflicts = await this._checkConflicts(currentBranch, 'main');
             const project = this._getProjectCode();
             const cardMatch = currentBranch.match(new RegExp(`${project}-(\\d+)`, 'i'));
             const cardNum = cardMatch ? cardMatch[1] : 'xxxx';
-            const mergeBranch = `merge/${project}-${cardNum}`;
+            const mergeBranch = `merge/${project}-${cardNum}-main`;
 
             if (!conflicts) {
                 return {
-                    success: true, wasInHml: !isHotfix, hasConflicts: false,
+                    success: true, hasConflicts: false,
                     message: `Sem conflitos detectados entre ${currentBranch} e main.`,
-                    suggestion: `Abra o Pull Request no GitHub:\nOrigem: ${currentBranch}\nDestino: main\n\nLembre de mencionar na descrição que foi validado em HML.\nAguarde CI verde + 1 aprovação antes de fazer o merge.`,
+                    suggestion: `Abra o Pull Request no GitHub:\nOrigem: ${currentBranch}\nDestino: main\n\nUse "Create a merge commit" (não squash, não rebase).`,
                     currentBranch,
                 };
             }
@@ -242,12 +247,12 @@ export class GitFlowService {
             await this._runGit('checkout main');
             await this._runGit('pull origin main');
             await this._runGit(`checkout -b ${mergeBranch}`);
-            try { await this._runGit(`merge --no-commit --no-ff ${currentBranch}`); } catch { /* esperado */ }
+            try { await this._runGit(`merge --no-commit --no-ff ${currentBranch}`); } catch { /* esperado com conflitos */ }
 
             return {
-                success: true, wasInHml: !isHotfix, hasConflicts: true,
+                success: true, hasConflicts: true,
                 message: `Branch ${mergeBranch} criada com conflitos para resolver.`,
-                suggestion: `Resolva os conflitos no VS Code (Source Control → Merge Editor).\n\nApós resolver todos os arquivos:\ngit add .\ngit commit -m "merge ${currentBranch} em main"\ngit push origin ${mergeBranch}\n\nDepois abra PR no GitHub:\nOrigem: ${mergeBranch} → Destino: main\nAguarde CI verde + 1 aprovação.`,
+                suggestion: `Resolva os conflitos no VS Code (Source Control → Merge Editor).\n\nApós resolver todos os arquivos:\ngit add .\ngit commit -m "merge ${currentBranch} em main"\ngit push origin ${mergeBranch}\n\nDepois abra PR no GitHub:\nOrigem: ${mergeBranch} → Destino: main`,
                 currentBranch, mergeBranch,
             };
         } catch (error: any) {

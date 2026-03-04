@@ -668,11 +668,10 @@ export function getMergeMainHtml(state: MergeViewState): string {
             </div>
 
             <p class="description-text">
-                Verifica se sua branch (<strong>${escapeHtml(state.currentBranch)}</strong>) passou por <strong>hml</strong> e pode ir para <strong>main</strong>.<br>
+                Verifica se sua branch atual (<strong>${escapeHtml(state.currentBranch)}</strong>) pode ser mergeada em <strong>main</strong>.<br>
                 <br>
                 <strong>Sem conflitos</strong> → instrui a abrir PR no GitHub.<br>
-                <strong>Com conflitos</strong> → cria branch <code>merge/</code> para resolver localmente.<br>
-                <strong>Hotfix</strong> → pula a validacao de HML.
+                <strong>Com conflitos</strong> → cria branch <code>merge/</code> para resolver localmente.
             </p>
 
             <button class="btn-execute" id="btnMergeMain">Verificar e Preparar Merge → Main</button>
