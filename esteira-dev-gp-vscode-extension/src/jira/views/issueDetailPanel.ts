@@ -159,6 +159,25 @@ export class IssueDetailPanel {
         try {
           const gitFlow = new GitFlowService();
           const result = await gitFlow.createBranchFromJira(msg.type, msg.issueKey);
+
+          // Refresh VS Code git extension so the new branch appears in SCM
+          if (result.success) {
+            await vscode.commands.executeCommand('git.refresh');
+
+            // Link branch to Jira issue in the development tab
+            try {
+              const repoUrl = await gitFlow.getRemoteUrl();
+              if (repoUrl && result.branchName) {
+                const branchUrl = `${repoUrl}/tree/${result.branchName}`;
+                await this.jiraClient.createRemoteLink(
+                  this.issue.key,
+                  branchUrl,
+                  `Branch: ${result.branchName}`,
+                );
+              }
+            } catch { /* non-blocking: link is optional */ }
+          }
+
           this.panel.webview.postMessage({ command: 'createBranchResult', result });
         } catch (err) {
           this.panel.webview.postMessage({

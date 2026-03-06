@@ -113,6 +113,21 @@ export class GitFlowService {
         }
     }
 
+    async getRemoteUrl(): Promise<string | null> {
+        try {
+            const url = await this._runGit('remote get-url origin');
+            // Convert SSH to HTTPS format
+            const sshMatch = url.match(/git@github\.com:([^/]+)\/([^/.]+)/);
+            if (sshMatch) {
+                return `https://github.com/${sshMatch[1]}/${sshMatch[2]}`;
+            }
+            // Remove .git suffix from HTTPS
+            return url.replace(/\.git$/, '');
+        } catch {
+            return null;
+        }
+    }
+
     // ── Ações do Git Flow ───────────────────────────────────
 
     async createBranch(type: string, cardNumber: string): Promise<CreateBranchResult> {
@@ -190,6 +205,7 @@ export class GitFlowService {
                 };
             }
 
+            await this._runGit(`pull origin ${currentBranch}`);
             await this._runGit('checkout hml');
             await this._runGit('pull origin hml');
             await this._runGit(`checkout -b ${mergeBranch}`);
