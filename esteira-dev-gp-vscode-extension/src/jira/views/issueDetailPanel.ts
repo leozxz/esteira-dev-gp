@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { JiraClient } from '../api/jiraClient';
 import { JiraIssue } from '../models/types';
+import { GitFlowService } from '../../services/gitFlowService';
 import { getBaseStyles } from '../../views/templates/baseStyles';
 import { buildCsp, getNonce, wrapHtml } from '../../utils/htmlHelpers';
 
@@ -9,6 +10,9 @@ interface WebviewMessage {
   transitionId?: string;
   priorityId?: string;
   accountId?: string | null;
+  type?: string;
+  issueKey?: string;
+  summary?: string;
 }
 
 export class IssueDetailPanel {
@@ -149,6 +153,40 @@ export class IssueDetailPanel {
         this.openClaudeWithIssue();
         break;
       }
+
+      case 'createBranch': {
+        if (!msg.type || !msg.issueKey) { return; }
+        try {
+          const gitFlow = new GitFlowService();
+          const result = await gitFlow.createBranchFromJira(msg.type, msg.issueKey);
+
+          // Refresh VS Code git extension so the new branch appears in SCM
+          if (result.success) {
+            await vscode.commands.executeCommand('git.refresh');
+
+            // Link branch to Jira issue in the development tab
+            try {
+              const repoUrl = await gitFlow.getRemoteUrl();
+              if (repoUrl && result.branchName) {
+                const branchUrl = `${repoUrl}/tree/${result.branchName}`;
+                await this.jiraClient.createRemoteLink(
+                  this.issue.key,
+                  branchUrl,
+                  `Branch: ${result.branchName}`,
+                );
+              }
+            } catch { /* non-blocking: link is optional */ }
+          }
+
+          this.panel.webview.postMessage({ command: 'createBranchResult', result });
+        } catch (err) {
+          this.panel.webview.postMessage({
+            command: 'createBranchResult',
+            result: { success: false, message: `Erro: ${err instanceof Error ? err.message : err}` },
+          });
+        }
+        break;
+      }
     }
   }
 
@@ -279,6 +317,72 @@ export class IssueDetailPanel {
         .btn-develop:hover { opacity: 0.85; }
         .btn-develop:active { transform: scale(0.97); }
         .btn-develop svg { width: 14px; height: 14px; }
+        .btn-develop:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .branch-creator {
+            margin-top: 12px;
+            padding: 14px;
+            border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
+            border-radius: 8px;
+            background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+            display: none;
+        }
+        .branch-creator.visible { display: block; }
+
+        .branch-creator .segment-group {
+            display: flex;
+            gap: 2px;
+            margin-bottom: 10px;
+            background: var(--vscode-input-background);
+            border-radius: 6px;
+            padding: 3px;
+        }
+        .branch-creator .segment {
+            flex: 1;
+            padding: 6px 8px;
+            text-align: center;
+            font-size: 11px;
+            font-weight: 600;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: transparent;
+            color: var(--vscode-foreground);
+            opacity: 0.6;
+            transition: all 0.15s;
+            font-family: inherit;
+        }
+        .branch-creator .segment:hover { opacity: 0.8; }
+        .branch-creator .segment.active { opacity: 1; color: #fff; }
+        .branch-creator .segment.active.feat { background: #7c3aed; }
+        .branch-creator .segment.active.bug { background: #ef4444; }
+        .branch-creator .segment.active.hotfix { background: #b91c1c; }
+
+        .branch-preview {
+            background: var(--vscode-input-background);
+            border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 10px;
+            font-family: var(--vscode-editor-font-family, monospace);
+            font-size: 12px;
+            color: ${accentColor};
+            font-weight: 600;
+            word-break: break-all;
+        }
+
+        .branch-result {
+            margin-top: 10px;
+            font-size: 12px;
+            line-height: 1.6;
+            display: none;
+        }
+        .branch-result.visible { display: block; }
+        .branch-result .success { color: #22c55e; }
+        .branch-result .error { color: #ef4444; }
+        .branch-result .step { color: var(--vscode-foreground); opacity: 0.7; }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
 
         .meta-section {
             margin-top: 24px;
@@ -492,6 +596,24 @@ export class IssueDetailPanel {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
             Desenvolver
         </button>
+        <button class="btn-develop" id="createBranchToggle" style="background:#7c3aed;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+            Criar Branch
+        </button>
+    </div>
+
+    <div class="branch-creator" id="branchCreator">
+        <div class="segment-group" id="branchType">
+            <button class="segment active feat" data-type="feat">feat/</button>
+            <button class="segment bug" data-type="bug">bug/</button>
+            <button class="segment hotfix" data-type="hotfix">hotfix/</button>
+        </div>
+        <div class="branch-preview" id="branchPreview">feat/${this.escapeHtml(issue.key.toLowerCase())}</div>
+        <button class="btn-develop" id="btnCreateBranch" style="width:100%;justify-content:center;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+            Criar Branch
+        </button>
+        <div class="branch-result" id="branchResult"></div>
     </div>
 
     <div class="meta-section">
@@ -680,6 +802,77 @@ export class IssueDetailPanel {
         document.getElementById('developBtn').addEventListener('click', () => {
             vscode.postMessage({ command: 'develop' });
         });
+
+        // ── Criar Branch ──
+        const ISSUE_KEY = '${this.escapeHtml(issue.key)}';
+
+        let selectedBranchType = 'feat';
+
+        document.getElementById('createBranchToggle').addEventListener('click', () => {
+            const creator = document.getElementById('branchCreator');
+            creator.classList.toggle('visible');
+            if (creator.classList.contains('visible')) { updateBranchPreview(); }
+        });
+
+        document.querySelectorAll('#branchType .segment').forEach(seg => {
+            seg.addEventListener('click', () => {
+                document.querySelectorAll('#branchType .segment').forEach(s => s.classList.remove('active'));
+                seg.classList.add('active');
+                selectedBranchType = seg.dataset.type;
+                updateBranchPreview();
+            });
+        });
+
+        function updateBranchPreview() {
+            document.getElementById('branchPreview').textContent =
+                selectedBranchType + '/' + ISSUE_KEY.toLowerCase();
+        }
+
+        document.getElementById('btnCreateBranch').addEventListener('click', () => {
+            const btn = document.getElementById('btnCreateBranch');
+            btn.dataset.originalText = btn.innerHTML;
+            btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:6px;"></span> Criando...';
+            btn.disabled = true;
+            vscode.postMessage({ command: 'createBranch', type: selectedBranchType, issueKey: ISSUE_KEY });
+        });
+
+        if (window._branchMsgHandler) { window.removeEventListener('message', window._branchMsgHandler); }
+        window._branchMsgHandler = function(event) {
+            const msg = event.data;
+            if (msg.command === 'createBranchResult') {
+                const btn = document.getElementById('btnCreateBranch');
+                btn.innerHTML = btn.dataset.originalText || btn.innerHTML;
+                btn.disabled = false;
+                const el = document.getElementById('branchResult');
+                const r = msg.result;
+                if (r.success) {
+                    let html = '<span class="success">\\u2705 ' + esc(r.message) + '</span>';
+                    if (r.steps) {
+                        r.steps.forEach(s => {
+                            const icon = s.status === 'done' ? '\\u2713' : '\\u2717';
+                            html += '<br><span class="step">  ' + icon + ' ' + esc(s.step) + '</span>';
+                        });
+                    }
+                    el.innerHTML = html;
+                } else {
+                    let html = '<span class="error">\\u274c ' + esc(r.message) + '</span>';
+                    if (r.steps) {
+                        r.steps.forEach(s => {
+                            const icon = s.status === 'done' ? '\\u2713' : s.status === 'error' ? '\\u2717' : '\\u00b7';
+                            html += '<br><span class="step">  ' + icon + ' ' + esc(s.step) + '</span>';
+                        });
+                    }
+                    el.innerHTML = html;
+                }
+                el.classList.add('visible');
+            }
+        };
+        window.addEventListener('message', window._branchMsgHandler);
+
+        function esc(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
     `;
 
     return wrapHtml({ csp, styles, body, script, nonce, title: `${issue.key} - ${f.summary}` });

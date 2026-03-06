@@ -123,70 +123,143 @@ export class GitService {
 
     // ── GitHub CLI ────────────────────────────────────────────────
 
-    isGhAuthenticated(): boolean {
+    // ── GitHub auth via VS Code native API ─────────────────
+
+    private _ghToken: string | undefined;
+    private _ghUsername: string | undefined;
+
+    async ghLogin(): Promise<boolean> {
         try {
-            execSync('gh auth status', {
-                cwd: this._workspaceRoot,
-                encoding: 'utf8',
-                timeout: 10000,
-                stdio: 'pipe',
-            });
+            const session = await vscode.authentication.getSession('github', ['repo', 'read:user'], { createIfNone: true });
+            this._ghToken = session.accessToken;
+            this._ghUsername = session.account.label;
             return true;
         } catch {
             return false;
         }
     }
 
-    ghGetUser(): string | null {
+    async ghLogout(): Promise<void> {
+        this._ghToken = undefined;
+        this._ghUsername = undefined;
+    }
+
+    async isGhAuthenticated(): Promise<boolean> {
         try {
-            const login = execSync('gh api user -q .login', {
-                cwd: this._workspaceRoot,
-                encoding: 'utf8',
-                timeout: 10000,
-                stdio: 'pipe',
-            }).trim();
-            return login || null;
+            const session = await vscode.authentication.getSession('github', ['repo', 'read:user'], { silent: true });
+            if (session) {
+                this._ghToken = session.accessToken;
+                this._ghUsername = session.account.label;
+                return true;
+            }
+            return false;
         } catch {
-            return null;
+            return false;
         }
     }
 
-    ghCreateRepo(name: string, isPrivate: boolean): void {
-        if (/[;&|`$(){}!<>\\]/.test(name)) {
-            throw new Error(`Nome de repositório inválido: "${name}"`);
-        }
-        const visibility = isPrivate ? '--private' : '--public';
-        execSync(`gh repo create "${name.replace(/"/g, '\\"')}" ${visibility} --source=. --push`, {
-            cwd: this._workspaceRoot,
-            encoding: 'utf8',
-            timeout: 30000,
-        });
+    getGhUsername(): string | undefined {
+        return this._ghUsername;
     }
 
-    ghLogin(): void {
-        const terminal = vscode.window.createTerminal({ name: 'GitHub Login', cwd: this._workspaceRoot });
-        terminal.sendText('gh auth login');
-        terminal.show();
+    getGhToken(): string | undefined {
+        return this._ghToken;
     }
 
-    ghCreatePr(base: string, title: string, body: string): string {
-        if (/[;&|`$(){}!<>\\]/.test(base)) {
-            throw new Error(`Branch base inválida: "${base}"`);
-        }
-        const head = this.getCurrentBranch();
-        const safeBase = base.replace(/"/g, '\\"');
-        const safeTitle = title.replace(/"/g, '\\"');
-        const safeBody = body.replace(/"/g, '\\"');
-        const result = execSync(
-            `gh pr create --base "${safeBase}" --head "${head}" --title "${safeTitle}" --body "${safeBody}"`,
-            {
-                cwd: this._workspaceRoot,
-                encoding: 'utf8',
-                timeout: 30000,
-                stdio: 'pipe',
+    // ── GitHub API helpers ──────────────────────────────────
+
+    private _getOwnerRepo(): { owner: string; repo: string } {
+        const remote = this._exec('git remote get-url origin').trim();
+        // SSH: git@github.com:owner/repo.git  or  HTTPS: https://github.com/owner/repo.git
+        const match = remote.match(/github\.com[:/]([^/]+)\/([^/.]+)/);
+        if (!match) { throw new Error(`Não foi possível extrair owner/repo de: ${remote}`); }
+        return { owner: match[1], repo: match[2] };
+    }
+
+    private async _ghApi(path: string, options: { method?: string; body?: unknown } = {}): Promise<unknown> {
+        if (!this._ghToken) { throw new Error('GitHub não autenticado.'); }
+        const response = await fetch(`https://api.github.com${path}`, {
+            method: options.method || 'GET',
+            headers: {
+                'Authorization': `Bearer ${this._ghToken}`,
+                'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+                ...(options.body ? { 'Content-Type': 'application/json' } : {}),
             },
-        );
-        return result.trim();
+            body: options.body ? JSON.stringify(options.body) : undefined,
+        });
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(`GitHub API ${response.status}: ${text}`);
+        }
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            return response.json();
+        }
+        return response.text();
+    }
+
+    ghGetUser(): string | null {
+        return this._ghUsername || null;
+    }
+
+    async ghCreatePr(base: string, title: string, body: string): Promise<string> {
+        const { owner, repo } = this._getOwnerRepo();
+        const head = this.getCurrentBranch();
+
+        // Validate: branch must be published to remote
+        try {
+            this._exec(`git rev-parse --verify origin/${head}`);
+        } catch {
+            throw new Error(
+                `A branch "${head}" não foi publicada no remoto. Execute "git push -u origin ${head}" antes de abrir o PR.`
+            );
+        }
+
+        // Validate: branch must have commits ahead of base
+        try {
+            const ahead = this._exec(`git log origin/${base}..origin/${head} --oneline`).trim();
+            if (ahead.length === 0) {
+                throw new Error(
+                    `A branch "${head}" não possui alterações em relação a "${base}". Não há nada para abrir um PR.`
+                );
+            }
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            // Only re-throw our custom messages; ignore git errors (e.g. base not found)
+            if (msg.includes('não possui alterações') || msg.includes('não foi publicada')) {
+                throw err;
+            }
+        }
+
+        try {
+            const result = await this._ghApi(`/repos/${owner}/${repo}/pulls`, {
+                method: 'POST',
+                body: { title, body, head, base },
+            }) as { html_url: string };
+            return result.html_url;
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            // Parse GitHub API error for user-friendly messages
+            if (msg.includes('422')) {
+                if (msg.includes('No commits between') || msg.includes('no commits')) {
+                    throw new Error(
+                        `Não há diferenças entre "${head}" e "${base}". Verifique se você fez push das suas alterações.`
+                    );
+                }
+                if (msg.includes('A pull request already exists')) {
+                    throw new Error(
+                        `Já existe um Pull Request aberto de "${head}" para "${base}".`
+                    );
+                }
+                if (msg.includes('merge conflict') || msg.includes('conflict')) {
+                    throw new Error(
+                        `Existem conflitos entre "${head}" e "${base}". Resolva os conflitos antes de abrir o PR.`
+                    );
+                }
+            }
+            throw err;
+        }
     }
 
     getCurrentBranch(): string {
@@ -298,84 +371,105 @@ export class GitService {
         this._exec(`git pull origin ${this._sanitize(branch)}`);
     }
 
-    // ── GitHub PR Operations ────────────────────────────────────
+    // ── GitHub PR Operations (via REST API) ────────────────────
 
-    ghListPrs(): GhPrListItem[] {
-        const fields = 'number,title,author,baseRefName,headRefName,isDraft,state,labels,reviewDecision,url';
-        const raw = execSync(
-            `gh pr list --json ${fields} --limit 30`,
-            { cwd: this._workspaceRoot, encoding: 'utf8', timeout: 30000, stdio: 'pipe' },
-        );
-        const parsed = JSON.parse(raw);
-        return (parsed as Array<Record<string, unknown>>).map(pr => ({
+    async ghListPrs(): Promise<GhPrListItem[]> {
+        const { owner, repo } = this._getOwnerRepo();
+        const prs = await this._ghApi(`/repos/${owner}/${repo}/pulls?state=open&per_page=30`) as Array<Record<string, unknown>>;
+        return prs.map(pr => ({
             number: pr.number as number,
             title: pr.title as string,
-            author: ((pr.author as Record<string, string>)?.login) ?? 'unknown',
-            baseRefName: pr.baseRefName as string,
-            headRefName: pr.headRefName as string,
-            isDraft: pr.isDraft as boolean,
-            state: pr.state as string,
+            author: ((pr.user as Record<string, string>)?.login) ?? 'unknown',
+            baseRefName: ((pr.base as Record<string, string>)?.ref) ?? '',
+            headRefName: ((pr.head as Record<string, string>)?.ref) ?? '',
+            isDraft: (pr.draft as boolean) ?? false,
+            state: ((pr.state as string) ?? 'open').toUpperCase(),
             labels: ((pr.labels as Array<Record<string, string>>) ?? []).map(l => l.name),
-            reviewDecision: (pr.reviewDecision as string) ?? '',
-            url: pr.url as string,
+            reviewDecision: '',
+            url: pr.html_url as string,
         }));
     }
 
-    ghGetPrDetail(prNumber: number): GhPrDetail {
+    async ghGetPrDetail(prNumber: number): Promise<GhPrDetail> {
         if (!Number.isInteger(prNumber) || prNumber <= 0) {
             throw new Error(`Número de PR inválido: ${prNumber}`);
         }
-        const fields = 'number,title,body,author,baseRefName,headRefName,isDraft,state,labels,reviewDecision,url,mergeable,statusCheckRollup,comments,reviews';
-        const raw = execSync(
-            `gh pr view ${prNumber} --json ${fields}`,
-            { cwd: this._workspaceRoot, encoding: 'utf8', timeout: 30000, stdio: 'pipe' },
-        );
-        const pr = JSON.parse(raw) as Record<string, unknown>;
+        const { owner, repo } = this._getOwnerRepo();
+
+        const [pr, reviews, comments] = await Promise.all([
+            this._ghApi(`/repos/${owner}/${repo}/pulls/${prNumber}`) as Promise<Record<string, unknown>>,
+            this._ghApi(`/repos/${owner}/${repo}/pulls/${prNumber}/reviews`) as Promise<Array<Record<string, unknown>>>,
+            this._ghApi(`/repos/${owner}/${repo}/issues/${prNumber}/comments`) as Promise<Array<Record<string, unknown>>>,
+        ]);
+
+        // Determine review decision from reviews
+        const approvals = reviews.filter(r => r.state === 'APPROVED').length;
+        const changesRequested = reviews.some(r => r.state === 'CHANGES_REQUESTED');
+        let reviewDecision = '';
+        if (changesRequested) { reviewDecision = 'CHANGES_REQUESTED'; }
+        else if (approvals > 0) { reviewDecision = 'APPROVED'; }
+
+        // Map mergeable_state
+        const mergeableRaw = pr.mergeable as boolean | null;
+        let mergeable = 'UNKNOWN';
+        if (mergeableRaw === true) { mergeable = 'MERGEABLE'; }
+        else if (mergeableRaw === false) { mergeable = 'CONFLICTING'; }
+
+        // Get status checks from combined status + check runs
+        const statusChecks: GhStatusCheck[] = [];
+        try {
+            const sha = ((pr.head as Record<string, unknown>)?.sha as string) ?? '';
+            if (sha) {
+                const checkRuns = await this._ghApi(`/repos/${owner}/${repo}/commits/${sha}/check-runs`) as Record<string, unknown>;
+                const runs = (checkRuns.check_runs as Array<Record<string, unknown>>) ?? [];
+                for (const run of runs) {
+                    statusChecks.push({
+                        name: (run.name as string) ?? 'check',
+                        status: ((run.status as string) ?? '').toUpperCase(),
+                        conclusion: ((run.conclusion as string) ?? '').toUpperCase(),
+                    });
+                }
+            }
+        } catch { /* non-critical */ }
+
         return {
             number: pr.number as number,
             title: pr.title as string,
             body: (pr.body as string) ?? '',
-            author: ((pr.author as Record<string, string>)?.login) ?? 'unknown',
-            baseRefName: pr.baseRefName as string,
-            headRefName: pr.headRefName as string,
-            isDraft: pr.isDraft as boolean,
-            state: pr.state as string,
+            author: ((pr.user as Record<string, string>)?.login) ?? 'unknown',
+            baseRefName: ((pr.base as Record<string, string>)?.ref) ?? '',
+            headRefName: ((pr.head as Record<string, string>)?.ref) ?? '',
+            isDraft: (pr.draft as boolean) ?? false,
+            state: ((pr.state as string) ?? 'open').toUpperCase(),
             labels: ((pr.labels as Array<Record<string, string>>) ?? []).map(l => l.name),
-            reviewDecision: (pr.reviewDecision as string) ?? '',
-            url: pr.url as string,
-            mergeable: (pr.mergeable as string) ?? 'UNKNOWN',
-            statusCheckRollup: ((pr.statusCheckRollup as Array<Record<string, string>>) ?? []).map(c => ({
-                name: c.name ?? c.context ?? 'check',
-                status: c.status ?? '',
-                conclusion: c.conclusion ?? '',
-            })),
-            comments: ((pr.comments as Array<Record<string, unknown>>) ?? []).map(c => ({
-                author: ((c.author as Record<string, string>)?.login) ?? 'unknown',
+            reviewDecision,
+            url: pr.html_url as string,
+            mergeable,
+            statusCheckRollup: statusChecks,
+            comments: comments.map(c => ({
+                author: ((c.user as Record<string, string>)?.login) ?? 'unknown',
                 body: (c.body as string) ?? '',
-                createdAt: (c.createdAt as string) ?? '',
+                createdAt: (c.created_at as string) ?? '',
             })),
-            reviews: ((pr.reviews as Array<Record<string, unknown>>) ?? []).map(r => ({
-                author: ((r.author as Record<string, string>)?.login) ?? 'unknown',
+            reviews: reviews.map(r => ({
+                author: ((r.user as Record<string, string>)?.login) ?? 'unknown',
                 body: (r.body as string) ?? '',
                 state: (r.state as string) ?? '',
-                createdAt: (r.submittedAt as string) ?? (r.createdAt as string) ?? '',
+                createdAt: (r.submitted_at as string) ?? '',
             })),
         };
     }
 
-    ghMergePr(prNumber: number, method: 'merge' | 'squash' | 'rebase'): string {
+    async ghMergePr(prNumber: number, method: 'merge' | 'squash' | 'rebase'): Promise<string> {
         if (!Number.isInteger(prNumber) || prNumber <= 0) {
             throw new Error(`Número de PR inválido: ${prNumber}`);
         }
-        const allowedMethods = ['merge', 'squash', 'rebase'];
-        if (!allowedMethods.includes(method)) {
-            throw new Error(`Método de merge inválido: ${method}`);
-        }
-        const result = execSync(
-            `gh pr merge ${prNumber} --${method}`,
-            { cwd: this._workspaceRoot, encoding: 'utf8', timeout: 30000, stdio: 'pipe' },
-        );
-        return result.trim();
+        const { owner, repo } = this._getOwnerRepo();
+        const result = await this._ghApi(`/repos/${owner}/${repo}/pulls/${prNumber}/merge`, {
+            method: 'PUT',
+            body: { merge_method: method },
+        }) as { sha: string; message: string };
+        return result.message || `Merged (${result.sha})`;
     }
 
     private _exec(cmd: string): string {

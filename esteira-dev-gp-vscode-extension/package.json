@@ -39,6 +39,11 @@
           },
           "default": [],
           "description": "Chaves dos projetos Jira a exibir na sidebar (ex: MARTECH, CRM). Se vazio, mostra apenas issues atribuídas a você."
+        },
+        "cportGitFlow.projectCode": {
+          "type": "string",
+          "default": "cport",
+          "description": "Codigo do projeto usado na nomenclatura de branches (ex: feat/cport-1234). Altere para o prefixo do seu projeto."
         }
       }
     },
@@ -73,10 +78,10 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
-    "@vitest/coverage-v8": "^2.1.0",
+    "@vitest/coverage-v8": "^4.0.18",
     "@vscode/vsce": "^3.0.0",
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.27.3",
     "typescript": "^5.3.0",
-    "vitest": "^2.1.0"
+    "vitest": "^4.0.18"
   }
 }

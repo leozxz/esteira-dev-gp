@@ -198,4 +198,24 @@ export class JiraClient {
       `/rest/api/3/user/assignable/search?project=${encodeURIComponent(projectKey)}`
     );
   }
+
+  async createRemoteLink(
+    issueKey: string,
+    url: string,
+    title: string,
+  ): Promise<void> {
+    await this.request<unknown>(`/rest/api/3/issue/${issueKey}/remotelink`, {
+      method: 'POST',
+      body: JSON.stringify({
+        object: {
+          url,
+          title,
+          icon: {
+            url16x16: 'https://github.githubassets.com/favicons/favicon.svg',
+            title: 'GitHub',
+          },
+        },
+      }),
+    });
+  }
 }

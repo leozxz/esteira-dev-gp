@@ -20,65 +20,16 @@ export function getDesenvolvimentoHtml(stage: StageInfo): string {
             ],
         },
         {
-            id: 'pull',
-            title: 'Pull',
-            description: 'Atualize seu repositório local com as alterações remotas.',
-            subtitle: 'Fazer Pull',
-            active: true,
-            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>`,
-            features: [
-                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>`, label: 'Pull' },
-                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>`, label: 'Branches' },
-            ],
-        },
-        {
             id: 'codereview',
             title: 'Code Review',
-            description: 'Revisão de código com análise de qualidade e segurança usando IA. Gera nota de 0 a 10.',
+            description: 'Revisao de codigo com analise de qualidade e seguranca usando IA. Gera nota de 0 a 10.',
             subtitle: 'Iniciar Review',
             active: true,
             icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
             features: [
                 { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 12 2 2 4-4"/></svg>`, label: 'Qualidade' },
-                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`, label: 'Segurança' },
+                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`, label: 'Seguranca' },
                 { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>`, label: 'Nota 0-10' },
-            ],
-        },
-        {
-            id: 'commit',
-            title: 'Commit',
-            description: 'Geração de commits semânticos e padronizados.',
-            subtitle: 'Criar Commit',
-            active: true,
-            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="1.05" y1="12" x2="7" y2="12"/><line x1="17.01" y1="12" x2="22.96" y2="12"/></svg>`,
-            features: [
-                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>`, label: 'Branches' },
-                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`, label: 'Stage' },
-                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><line x1="1.05" y1="12" x2="7" y2="12"/><line x1="17.01" y1="12" x2="22.96" y2="12"/></svg>`, label: 'Commit' },
-            ],
-        },
-        {
-            id: 'push',
-            title: 'Push',
-            description: 'Envie seus commits para o repositório remoto.',
-            subtitle: 'Fazer Push',
-            active: true,
-            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`,
-            features: [
-                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`, label: 'Push' },
-                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`, label: 'Remote' },
-            ],
-        },
-        {
-            id: 'pr',
-            title: 'PR',
-            description: 'Crie Pull Requests para revisão e merge de código.',
-            subtitle: 'Criar PR',
-            active: true,
-            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>`,
-            features: [
-                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>`, label: 'Pull Request' },
-                { icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65S8.93 17.38 9 18v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>`, label: 'GitHub' },
             ],
         },
     ];
@@ -104,7 +55,7 @@ export function getDesenvolvimentoHtml(stage: StageInfo): string {
     const styles = getBaseStyles(stage.color) + `
         .dev-cards-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(2, 1fr);
             gap: 16px;
         }
 
@@ -257,16 +208,8 @@ export function getDesenvolvimentoHtml(stage: StageInfo): string {
                 const cardId = card.getAttribute('data-card');
                 if (cardId === 'codereview') {
                     vscode.postMessage({ command: 'openCodeReview' });
-                } else if (cardId === 'commit') {
-                    vscode.postMessage({ command: 'openCommit' });
-                } else if (cardId === 'pull') {
-                    vscode.postMessage({ command: 'openPull' });
                 } else if (cardId === 'novoProjeto') {
                     vscode.postMessage({ command: 'openNovoProjeto' });
-                } else if (cardId === 'push') {
-                    vscode.postMessage({ command: 'openPush' });
-                } else if (cardId === 'pr') {
-                    vscode.postMessage({ command: 'openPr' });
                 }
             });
         });

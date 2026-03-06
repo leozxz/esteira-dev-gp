@@ -373,6 +373,7 @@ export function getSidebarHtml(stages: StageInfo[], jiraState?: JiraSidebarState
             outline: none;
             border-color: var(--vscode-focusBorder);
         }
+
     `;
 
     const body = `
@@ -436,7 +437,7 @@ export function getSidebarHtml(stages: StageInfo[], jiraState?: JiraSidebarState
             }
         });
 
-        // Listen for Jira state updates from the extension
+        // Listen for state updates from the extension
         window.addEventListener('message', (event) => {
             const msg = event.data;
             if (msg.command === 'jiraState') {

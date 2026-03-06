@@ -4,7 +4,7 @@ import { TerminalService } from '../services/terminalService';
 import { ClaudeRunnerService } from '../services/claudeRunnerService';
 import { ProdutoPanel } from './produtoPanel';
 import { DesenvolvimentoPanel } from './desenvolvimentoPanel';
-import { DeployPanel } from './deployPanel';
+import { VersionamentoPanel } from './versionamentoPanel';
 import { getSidebarHtml, JiraFilter, JiraSidebarState } from './templates/sidebarTemplate';
 import { getStagePlaceholderHtml } from './templates/stagePlaceholderTemplate';
 import { TokenManager } from '../jira/auth/tokenManager';
@@ -17,7 +17,7 @@ import { JiraIssue } from '../jira/models/types';
 export class EsteiraSidebarProvider implements vscode.WebviewViewProvider {
     private readonly _produtoPanel: ProdutoPanel;
     private readonly _desenvolvimentoPanel: DesenvolvimentoPanel;
-    private readonly _deployPanel: DeployPanel;
+    private readonly _versionamentoPanel: VersionamentoPanel;
 
     private readonly _stageHandlers: Record<string, () => void>;
 
@@ -37,7 +37,7 @@ export class EsteiraSidebarProvider implements vscode.WebviewViewProvider {
     ) {
         this._produtoPanel = new ProdutoPanel(terminalService);
         this._desenvolvimentoPanel = new DesenvolvimentoPanel(claudeRunner);
-        this._deployPanel = new DeployPanel();
+        this._versionamentoPanel = new VersionamentoPanel();
 
         this._stageHandlers = {
             produto: () => {
@@ -48,9 +48,9 @@ export class EsteiraSidebarProvider implements vscode.WebviewViewProvider {
                 const stage = STAGES.find((s) => s.id === 'desenvolvimento')!;
                 this._desenvolvimentoPanel.open(stage);
             },
-            deploy: () => {
-                const stage = STAGES.find((s) => s.id === 'deploy')!;
-                this._deployPanel.open(stage);
+            versionamento: () => {
+                const stage = STAGES.find((s) => s.id === 'versionamento')!;
+                this._versionamentoPanel.open(stage);
             },
         };
 
@@ -101,9 +101,11 @@ export class EsteiraSidebarProvider implements vscode.WebviewViewProvider {
             }
         });
 
-        // Check if already logged in and load issues
+        // Check auth states on startup
         this._initJiraState();
     }
+
+    // ── Jira ─────────────────────────────────────────────────
 
     private async _initJiraState(): Promise<void> {
         const loggedIn = await this._jiraAuth.isLoggedIn();
@@ -225,7 +227,6 @@ export class EsteiraSidebarProvider implements vscode.WebviewViewProvider {
 
     private _sendJiraState(): void {
         if (!this._webviewView) { return; }
-        // Re-render the entire sidebar with the updated Jira state
         this._webviewView.webview.html = getSidebarHtml(STAGES, this._jiraState);
     }
 
@@ -250,7 +251,7 @@ export class EsteiraSidebarProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        // QA, Deploy, and future stages use placeholder
+        // QA and future stages use placeholder
         const panel = vscode.window.createWebviewPanel(
             `esteira.${stageId}`,
             `Esteira - ${stage.title}`,
