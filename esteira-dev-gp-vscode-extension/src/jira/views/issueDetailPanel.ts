@@ -13,6 +13,7 @@ interface WebviewMessage {
   type?: string;
   issueKey?: string;
   summary?: string;
+  branchName?: string;
 }
 
 export class IssueDetailPanel {
@@ -151,6 +152,62 @@ export class IssueDetailPanel {
 
       case 'develop': {
         this.openClaudeWithIssue();
+        break;
+      }
+
+      case 'checkBranchStatus': {
+        try {
+          const gitFlow = new GitFlowService();
+          const currentBranch = await gitFlow.getCurrentBranch();
+          const issueKey = this.issue.key.toLowerCase();
+          // Check all common branch types
+          const branchTypes = ['feat', 'bug', 'hotfix'];
+          let linkedBranch: string | null = null;
+
+          for (const t of branchTypes) {
+            const candidate = `${t}/${issueKey}`;
+            try {
+              await gitFlow.branchExists(candidate);
+              linkedBranch = candidate;
+              break;
+            } catch { /* branch doesn't exist */ }
+          }
+
+          this.panel.webview.postMessage({
+            command: 'branchStatusResult',
+            linkedBranch,
+            currentBranch,
+            isOnLinkedBranch: linkedBranch !== null && currentBranch === linkedBranch,
+          });
+        } catch {
+          this.panel.webview.postMessage({
+            command: 'branchStatusResult',
+            linkedBranch: null,
+            currentBranch: null,
+            isOnLinkedBranch: false,
+          });
+        }
+        break;
+      }
+
+      case 'checkoutBranch': {
+        if (!msg.branchName) { return; }
+        try {
+          const gitFlow = new GitFlowService();
+          await gitFlow.checkoutBranch(msg.branchName);
+          await vscode.commands.executeCommand('git.refresh');
+          this.panel.webview.postMessage({
+            command: 'checkoutResult',
+            success: true,
+            branchName: msg.branchName,
+          });
+        } catch (err) {
+          this.panel.webview.postMessage({
+            command: 'checkoutResult',
+            success: false,
+            message: `Erro ao fazer checkout: ${err instanceof Error ? err.message : err}`,
+          });
+        }
         break;
       }
 
@@ -382,6 +439,38 @@ export class IssueDetailPanel {
         .branch-result .error { color: #ef4444; }
         .branch-result .step { color: var(--vscode-foreground); opacity: 0.7; }
 
+        .branch-info {
+            margin-top: 10px;
+        }
+
+        .branch-linked-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            font-family: var(--vscode-editor-font-family, monospace);
+            background: color-mix(in srgb, #7c3aed 12%, transparent);
+            border: 1px solid color-mix(in srgb, #7c3aed 30%, transparent);
+            color: var(--vscode-foreground);
+        }
+
+        .branch-linked-badge .branch-icon {
+            color: #7c3aed;
+        }
+
+        .branch-linked-badge .current-indicator {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: #22c55e;
+            color: #fff;
+            margin-left: 4px;
+        }
+
         @keyframes spin { to { transform: rotate(360deg); } }
 
         .meta-section {
@@ -596,10 +685,14 @@ export class IssueDetailPanel {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
             Desenvolver
         </button>
-        <button class="btn-develop" id="createBranchToggle" style="background:#7c3aed;">
+        <button class="btn-develop" id="branchActionBtn" style="background:#7c3aed;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
-            Criar Branch
+            <span id="branchActionLabel">Carregando...</span>
         </button>
+    </div>
+
+    <div class="branch-info" id="branchInfo" style="display:none;">
+        <div class="branch-linked-badge" id="branchLinkedBadge"></div>
     </div>
 
     <div class="branch-creator" id="branchCreator">
@@ -803,15 +896,65 @@ export class IssueDetailPanel {
             vscode.postMessage({ command: 'develop' });
         });
 
-        // ── Criar Branch ──
+        // ── Branch state management ──
         const ISSUE_KEY = '${this.escapeHtml(issue.key)}';
+        const BRANCH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>';
 
         let selectedBranchType = 'feat';
+        let _linkedBranch = null;
+        let _isOnLinkedBranch = false;
 
-        document.getElementById('createBranchToggle').addEventListener('click', () => {
-            const creator = document.getElementById('branchCreator');
-            creator.classList.toggle('visible');
-            if (creator.classList.contains('visible')) { updateBranchPreview(); }
+        const branchActionBtn = document.getElementById('branchActionBtn');
+        const branchActionLabel = document.getElementById('branchActionLabel');
+        const branchInfo = document.getElementById('branchInfo');
+        const branchLinkedBadge = document.getElementById('branchLinkedBadge');
+
+        function updateBranchUI(linkedBranch, currentBranch, isOnLinkedBranch) {
+            _linkedBranch = linkedBranch;
+            _isOnLinkedBranch = isOnLinkedBranch;
+
+            if (!linkedBranch) {
+                // No branch linked — show "Criar Branch" button
+                branchActionBtn.style.background = '#7c3aed';
+                branchActionLabel.textContent = 'Criar Branch';
+                branchInfo.style.display = 'none';
+            } else if (isOnLinkedBranch) {
+                // On the linked branch — show "Branch Atual"
+                branchActionBtn.style.background = '#22c55e';
+                branchActionLabel.textContent = 'Branch Atual';
+                branchInfo.style.display = 'block';
+                branchLinkedBadge.innerHTML =
+                    '<span class="branch-icon">' + BRANCH_SVG + '</span> ' +
+                    esc(linkedBranch) +
+                    '<span class="current-indicator">atual</span>';
+            } else {
+                // Branch exists but not current — show "Checkout"
+                branchActionBtn.style.background = '#0065FF';
+                branchActionLabel.textContent = 'Checkout Branch';
+                branchInfo.style.display = 'block';
+                branchLinkedBadge.innerHTML =
+                    '<span class="branch-icon">' + BRANCH_SVG + '</span> ' +
+                    esc(linkedBranch);
+            }
+        }
+
+        // Request branch status on load
+        vscode.postMessage({ command: 'checkBranchStatus' });
+
+        branchActionBtn.addEventListener('click', () => {
+            if (!_linkedBranch) {
+                // Toggle branch creator
+                const creator = document.getElementById('branchCreator');
+                creator.classList.toggle('visible');
+                if (creator.classList.contains('visible')) { updateBranchPreview(); }
+            } else if (_isOnLinkedBranch) {
+                // Already on branch, do nothing
+            } else {
+                // Checkout branch
+                branchActionBtn.disabled = true;
+                branchActionLabel.textContent = 'Checking out...';
+                vscode.postMessage({ command: 'checkoutBranch', branchName: _linkedBranch });
+            }
         });
 
         document.querySelectorAll('#branchType .segment').forEach(seg => {
@@ -839,6 +982,22 @@ export class IssueDetailPanel {
         if (window._branchMsgHandler) { window.removeEventListener('message', window._branchMsgHandler); }
         window._branchMsgHandler = function(event) {
             const msg = event.data;
+
+            if (msg.command === 'branchStatusResult') {
+                updateBranchUI(msg.linkedBranch, msg.currentBranch, msg.isOnLinkedBranch);
+            }
+
+            if (msg.command === 'checkoutResult') {
+                branchActionBtn.disabled = false;
+                if (msg.success) {
+                    updateBranchUI(msg.branchName, msg.branchName, true);
+                } else {
+                    showError(msg.message || 'Erro ao fazer checkout');
+                    // Re-check status
+                    vscode.postMessage({ command: 'checkBranchStatus' });
+                }
+            }
+
             if (msg.command === 'createBranchResult') {
                 const btn = document.getElementById('btnCreateBranch');
                 btn.innerHTML = btn.dataset.originalText || btn.innerHTML;
@@ -854,6 +1013,12 @@ export class IssueDetailPanel {
                         });
                     }
                     el.innerHTML = html;
+                    el.classList.add('visible');
+                    // Hide creator and update state to show the new branch
+                    setTimeout(() => {
+                        document.getElementById('branchCreator').classList.remove('visible');
+                        updateBranchUI(r.branchName, r.branchName, true);
+                    }, 2000);
                 } else {
                     let html = '<span class="error">\\u274c ' + esc(r.message) + '</span>';
                     if (r.steps) {
@@ -863,8 +1028,8 @@ export class IssueDetailPanel {
                         });
                     }
                     el.innerHTML = html;
+                    el.classList.add('visible');
                 }
-                el.classList.add('visible');
             }
         };
         window.addEventListener('message', window._branchMsgHandler);

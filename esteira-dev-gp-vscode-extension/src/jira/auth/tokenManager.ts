@@ -14,6 +14,9 @@ export class TokenManager {
       tokens.userEmail
         ? this.secrets.store(SECRET_KEYS.userEmail, tokens.userEmail)
         : Promise.resolve(),
+      tokens.siteUrl
+        ? this.secrets.store(SECRET_KEYS.siteUrl, tokens.siteUrl)
+        : Promise.resolve(),
     ]);
   }
 
@@ -28,6 +31,7 @@ export class TokenManager {
     }
 
     const userEmail = await this.secrets.get(SECRET_KEYS.userEmail);
+    const siteUrl = await this.secrets.get(SECRET_KEYS.siteUrl);
 
     return {
       accessToken,
@@ -35,6 +39,7 @@ export class TokenManager {
       expiresAt: Number(expiresAt),
       cloudId,
       userEmail: userEmail ?? undefined,
+      siteUrl: siteUrl ?? undefined,
     };
   }
 

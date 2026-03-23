@@ -79,6 +79,7 @@ export interface AuthTokens {
   expiresAt: number;
   cloudId: string;
   userEmail?: string;
+  siteUrl?: string;
 }
 
 export interface JiraSearchResponse {

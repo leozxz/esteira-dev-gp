@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { type StageInfo } from '../data/stages';
 import { GitFlowService } from '../services/gitFlowService';
 import { GitService } from '../services/gitService';
+import { TokenManager } from '../jira/auth/tokenManager';
 import { getVersionamentoHtml, type GhAuthState } from './templates/versionamentoTemplate';
 import {
     getCreateBranchHtml,
@@ -20,7 +21,7 @@ export class VersionamentoPanel {
     private _gitService: GitService;
     private _jiraClient: JiraClient | undefined;
 
-    constructor(jiraClient?: JiraClient) {
+    constructor(private _tokenManager: TokenManager, jiraClient?: JiraClient) {
         this._gitFlowService = new GitFlowService();
         this._gitService = new GitService();
         this._jiraClient = jiraClient;
@@ -244,11 +245,37 @@ export class VersionamentoPanel {
                 });
                 return;
             }
-            const url = await this._gitService.ghCreatePr(base, title, body);
+
+            // Append Jira card link to PR body if issue key detected in branch
+            const finalBody = await this._appendJiraLink(body);
+
+            const url = await this._gitService.ghCreatePr(base, title, finalBody);
             this._panel.webview.postMessage({ command: 'createPrResult', success: true, url });
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             this._panel.webview.postMessage({ command: 'createPrResult', success: false, error: msg });
+        }
+    }
+
+    private async _appendJiraLink(body: string): Promise<string> {
+        try {
+            const currentBranch = this._gitService.getCurrentBranch();
+            // Match issue key pattern: PROJECT-123 (e.g., feat/cport-1622 → CPORT-1622)
+            const match = currentBranch.match(/([a-zA-Z]+-\d+)/);
+            if (!match) { return body; }
+
+            const issueKey = match[1].toUpperCase();
+            const tokens = await this._tokenManager.getTokens();
+            const siteUrl = tokens?.siteUrl;
+
+            if (!siteUrl) { return body; }
+
+            const jiraLink = `${siteUrl}/browse/${issueKey}`;
+            const linkSection = `\n\n---\nJira: [${issueKey}](${jiraLink})`;
+
+            return body ? body + linkSection : linkSection.trimStart();
+        } catch {
+            return body;
         }
     }
 

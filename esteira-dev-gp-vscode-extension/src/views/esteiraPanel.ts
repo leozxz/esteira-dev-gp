@@ -35,14 +35,14 @@ export class EsteiraSidebarProvider implements vscode.WebviewViewProvider {
         terminalService: TerminalService,
         claudeRunner: ClaudeRunnerService
     ) {
-        // Initialize Jira services
+        // Initialize Jira services (before panels that depend on them)
         this._tokenManager = new TokenManager(this._context.secrets);
         this._jiraAuth = new JiraAuthProvider(this._tokenManager);
         this._jiraClient = new JiraClient(this._jiraAuth, this._tokenManager);
 
         this._produtoPanel = new ProdutoPanel(terminalService);
         this._desenvolvimentoPanel = new DesenvolvimentoPanel(claudeRunner);
-        this._versionamentoPanel = new VersionamentoPanel(this._jiraClient);
+        this._versionamentoPanel = new VersionamentoPanel(this._tokenManager, this._jiraClient);
 
         this._stageHandlers = {
             produto: () => {
