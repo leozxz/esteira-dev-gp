@@ -35,4 +35,5 @@ export const SECRET_KEYS = {
   expiresAt: 'jira.expiresAt',
   cloudId: 'jira.cloudId',
   userEmail: 'jira.userEmail',
+  siteUrl: 'jira.siteUrl',
 } as const;

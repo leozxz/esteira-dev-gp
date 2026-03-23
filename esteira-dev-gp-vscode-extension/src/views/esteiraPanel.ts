@@ -35,9 +35,14 @@ export class EsteiraSidebarProvider implements vscode.WebviewViewProvider {
         terminalService: TerminalService,
         claudeRunner: ClaudeRunnerService
     ) {
+        // Initialize Jira services (before panels that depend on them)
+        this._tokenManager = new TokenManager(this._context.secrets);
+        this._jiraAuth = new JiraAuthProvider(this._tokenManager);
+        this._jiraClient = new JiraClient(this._jiraAuth, this._tokenManager);
+
         this._produtoPanel = new ProdutoPanel(terminalService);
         this._desenvolvimentoPanel = new DesenvolvimentoPanel(claudeRunner);
-        this._versionamentoPanel = new VersionamentoPanel();
+        this._versionamentoPanel = new VersionamentoPanel(this._tokenManager, this._jiraClient);
 
         this._stageHandlers = {
             produto: () => {
@@ -53,11 +58,6 @@ export class EsteiraSidebarProvider implements vscode.WebviewViewProvider {
                 this._versionamentoPanel.open(stage);
             },
         };
-
-        // Initialize Jira services
-        this._tokenManager = new TokenManager(this._context.secrets);
-        this._jiraAuth = new JiraAuthProvider(this._tokenManager);
-        this._jiraClient = new JiraClient(this._jiraAuth, this._tokenManager);
     }
 
     resolveWebviewView(
@@ -203,9 +203,11 @@ export class EsteiraSidebarProvider implements vscode.WebviewViewProvider {
     private async _handleJiraOpenIssue(issueKey: string): Promise<void> {
         try {
             const issue: JiraIssue = await this._jiraClient.getIssue(issueKey);
+            const tokens = await this._tokenManager.getTokens();
+            const siteUrl = tokens?.siteUrl;
             IssueDetailPanel.show(issue, this._extensionUri, this._jiraClient, () => {
                 this._loadJiraIssues();
-            });
+            }, siteUrl);
         } catch (err) {
             vscode.window.showErrorMessage(
                 `Erro ao abrir issue: ${err instanceof Error ? err.message : err}`

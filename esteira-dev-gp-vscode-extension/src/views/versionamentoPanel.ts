@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import { type StageInfo } from '../data/stages';
 import { GitFlowService } from '../services/gitFlowService';
 import { GitService } from '../services/gitService';
-import { getVersionamentoHtml, type GhAuthState } from './templates/versionamentoTemplate';
+import { TokenManager } from '../jira/auth/tokenManager';
+import { getVersionamentoHtml, type GhAuthState, type JiraCardInfo } from './templates/versionamentoTemplate';
 import {
     getCreateBranchHtml,
     getCreatePrHtml,
@@ -11,16 +12,19 @@ import {
 } from './templates/gitFlowTemplates';
 import { getDeployPrListHtml, type DeployPrListState } from './templates/deployPrListTemplate';
 import { getDeployPrDetailHtml, type DeployPrDetailState } from './templates/deployPrDetailTemplate';
+import { JiraClient } from '../jira/api/jiraClient';
 
 export class VersionamentoPanel {
     private _panel: vscode.WebviewPanel | undefined;
     private _stage: StageInfo | undefined;
     private _gitFlowService: GitFlowService;
     private _gitService: GitService;
+    private _jiraClient: JiraClient | undefined;
 
-    constructor() {
+    constructor(private _tokenManager: TokenManager, jiraClient?: JiraClient) {
         this._gitFlowService = new GitFlowService();
         this._gitService = new GitService();
+        this._jiraClient = jiraClient;
     }
 
     open(stage: StageInfo): void {
@@ -95,6 +99,14 @@ export class VersionamentoPanel {
                 case 'executeMerge':
                     this._handleMergePr(message.prNumber, message.method);
                     break;
+                case 'openCreatePrFromMerge':
+                    this._handleOpenCreatePr(message.base);
+                    break;
+                case 'openJiraCard':
+                    if (message.url) {
+                        vscode.env.openExternal(vscode.Uri.parse(message.url));
+                    }
+                    break;
                 case 'openConflictUrl':
                     if (message.url) {
                         vscode.env.openExternal(vscode.Uri.parse(message.url));
@@ -111,7 +123,35 @@ export class VersionamentoPanel {
     private async _showMenu(): Promise<void> {
         if (this._panel && this._stage) {
             const ghAuth = await this._getGhAuthState();
-            this._panel.webview.html = getVersionamentoHtml(this._stage, ghAuth);
+            const jiraCard = await this._getJiraCardInfo();
+            this._panel.webview.html = getVersionamentoHtml(this._stage, ghAuth, jiraCard);
+        }
+    }
+
+    private async _getJiraCardInfo(): Promise<JiraCardInfo | undefined> {
+        try {
+            const currentBranch = this._gitService.getCurrentBranch();
+            const match = currentBranch.match(/([a-zA-Z]+-\d+)/);
+            if (!match) { return undefined; }
+
+            const issueKey = match[1].toUpperCase();
+            const tokens = await this._tokenManager.getTokens();
+            const siteUrl = tokens?.siteUrl;
+            if (!siteUrl) { return undefined; }
+
+            const url = `${siteUrl}/browse/${issueKey}`;
+            let summary: string | undefined;
+
+            if (this._jiraClient) {
+                try {
+                    const issue = await this._jiraClient.getIssue(issueKey);
+                    summary = issue.fields.summary;
+                } catch { /* Jira not available */ }
+            }
+
+            return { key: issueKey, url, summary };
+        } catch {
+            return undefined;
         }
     }
 
@@ -186,7 +226,7 @@ export class VersionamentoPanel {
 
     // ── Create PR Handlers ───────────────────────────────────────
 
-    private async _handleOpenCreatePr(): Promise<void> {
+    private async _handleOpenCreatePr(preselectedBase?: string): Promise<void> {
         if (!this._panel) { return; }
         try {
             const currentBranch = await this._gitFlowService.getCurrentBranch();
@@ -199,7 +239,39 @@ export class VersionamentoPanel {
                 ...priority.filter(b => remoteBranches.includes(b)),
                 ...remoteBranches.filter(b => !priority.includes(b)),
             ];
-            this._panel.webview.html = getCreatePrHtml({ currentBranch, baseBranches });
+
+            // Auto-fill: title = "branchName -> baseBranch"
+            const defaultBase = preselectedBase || baseBranches[0] || 'main';
+            const defaultTitle = `${currentBranch} -> ${defaultBase}`;
+
+            // Auto-fill: description from Jira card title + link
+            let defaultBody = '';
+            const issueKeyMatch = currentBranch.match(/([a-zA-Z]+-\d+)/);
+            if (issueKeyMatch) {
+                const issueKey = issueKeyMatch[1].toUpperCase();
+                const tokens = await this._tokenManager.getTokens();
+                const siteUrl = tokens?.siteUrl;
+
+                if (this._jiraClient) {
+                    try {
+                        const issue = await this._jiraClient.getIssue(issueKey);
+                        defaultBody = issue.fields.summary;
+                    } catch { /* Jira not available or issue not found */ }
+                }
+
+                if (siteUrl) {
+                    const jiraLink = `${siteUrl}/browse/${issueKey}`;
+                    defaultBody += `\n\n---\nJira: [${issueKey}](${jiraLink})`;
+                }
+            }
+
+            this._panel.webview.html = getCreatePrHtml({
+                currentBranch,
+                baseBranches,
+                defaultTitle,
+                defaultBody,
+                preselectedBase: preselectedBase,
+            });
         } catch {
             this._panel.webview.html = getCreatePrHtml({ currentBranch: 'unknown', baseBranches: ['hml', 'main'] });
         }
@@ -217,11 +289,41 @@ export class VersionamentoPanel {
                 });
                 return;
             }
-            const url = await this._gitService.ghCreatePr(base, title, body);
+
+            // Append Jira card link to PR body if issue key detected in branch
+            const finalBody = await this._appendJiraLink(body);
+
+            const url = await this._gitService.ghCreatePr(base, title, finalBody);
             this._panel.webview.postMessage({ command: 'createPrResult', success: true, url });
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             this._panel.webview.postMessage({ command: 'createPrResult', success: false, error: msg });
+        }
+    }
+
+    private async _appendJiraLink(body: string): Promise<string> {
+        try {
+            const currentBranch = this._gitService.getCurrentBranch();
+            // Match issue key pattern: PROJECT-123 (e.g., feat/cport-1622 → CPORT-1622)
+            const match = currentBranch.match(/([a-zA-Z]+-\d+)/);
+            if (!match) { return body; }
+
+            const issueKey = match[1].toUpperCase();
+
+            // Skip if the body already contains a Jira link for this issue
+            if (body.includes(`/browse/${issueKey}`)) { return body; }
+
+            const tokens = await this._tokenManager.getTokens();
+            const siteUrl = tokens?.siteUrl;
+
+            if (!siteUrl) { return body; }
+
+            const jiraLink = `${siteUrl}/browse/${issueKey}`;
+            const linkSection = `\n\n---\nJira: [${issueKey}](${jiraLink})`;
+
+            return body ? body + linkSection : linkSection.trimStart();
+        } catch {
+            return body;
         }
     }
 

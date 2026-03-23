@@ -128,6 +128,20 @@ export class GitFlowService {
         }
     }
 
+    async branchExists(branchName: string): Promise<void> {
+        // Throws if branch doesn't exist locally or remotely
+        try {
+            await this._runGit(`rev-parse --verify ${branchName}`);
+        } catch {
+            // Try remote
+            await this._runGit(`rev-parse --verify origin/${branchName}`);
+        }
+    }
+
+    async checkoutBranch(branchName: string): Promise<void> {
+        await this._runGit(`checkout ${branchName}`);
+    }
+
     // ── Ações do Git Flow ───────────────────────────────────
 
     async createBranch(type: string, cardNumber: string): Promise<CreateBranchResult> {

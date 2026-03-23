@@ -101,6 +101,7 @@ export class JiraAuthProvider {
         expiresAt: Date.now() + data.expires_in * 1000,
         cloudId: currentTokens.cloudId,
         userEmail: currentTokens.userEmail,
+        siteUrl: currentTokens.siteUrl,
       };
 
       await this.tokenManager.saveTokens(tokens);
@@ -206,6 +207,7 @@ export class JiraAuthProvider {
       refreshToken: tokenData.refresh_token,
       expiresAt: Date.now() + tokenData.expires_in * 1000,
       cloudId: selectedResource.id,
+      siteUrl: selectedResource.url,
       userEmail,
     };
   }
