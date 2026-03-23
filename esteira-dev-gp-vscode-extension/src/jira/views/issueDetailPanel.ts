@@ -25,16 +25,18 @@ export class IssueDetailPanel {
     issue: JiraIssue,
     extensionUri: vscode.Uri,
     jiraClient: JiraClient,
-    onUpdated: () => void
+    onUpdated: () => void,
+    siteUrl?: string
   ): IssueDetailPanel {
     const existing = IssueDetailPanel.panels.get(issue.key);
     if (existing && !existing.disposed) {
       existing.panel.reveal();
+      existing.siteUrl = siteUrl;
       existing.update(issue);
       return existing;
     }
 
-    const instance = new IssueDetailPanel(issue, extensionUri, jiraClient, onUpdated);
+    const instance = new IssueDetailPanel(issue, extensionUri, jiraClient, onUpdated, siteUrl);
     IssueDetailPanel.panels.set(issue.key, instance);
     return instance;
   }
@@ -43,7 +45,8 @@ export class IssueDetailPanel {
     private issue: JiraIssue,
     private extensionUri: vscode.Uri,
     private jiraClient: JiraClient,
-    private onUpdated: () => void
+    private onUpdated: () => void,
+    private siteUrl?: string
   ) {
     this.panel = vscode.window.createWebviewPanel(
       'jiraIssueDetail',
@@ -152,6 +155,14 @@ export class IssueDetailPanel {
 
       case 'develop': {
         this.openClaudeWithIssue();
+        break;
+      }
+
+      case 'openInJira': {
+        if (this.siteUrl) {
+          const url = `${this.siteUrl}/browse/${this.issue.key}`;
+          vscode.env.openExternal(vscode.Uri.parse(url));
+        }
         break;
       }
 
@@ -688,7 +699,11 @@ export class IssueDetailPanel {
         <button class="btn-develop" id="branchActionBtn" style="background:#7c3aed;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
             <span id="branchActionLabel">Carregando...</span>
-        </button>
+        </button>${this.siteUrl ? `
+        <button class="btn-develop" id="openInJiraBtn" style="background:#0065FF;">
+            <svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px;"><path d="M11.53 2c0 2.4 1.97 4.35 4.35 4.35h1.78v1.7c0 2.4 1.94 4.34 4.34 4.35V2.84a.84.84 0 0 0-.84-.84H11.53zM6.77 6.8a4.36 4.36 0 0 0 4.34 4.34h1.8v1.72a4.36 4.36 0 0 0 4.34 4.34V7.63a.84.84 0 0 0-.83-.83H6.77zM2 11.6a4.35 4.35 0 0 0 4.35 4.35h1.78v1.71c0 2.4 1.94 4.35 4.34 4.35V12.44a.84.84 0 0 0-.84-.84H2z"/></svg>
+            Abrir no Jira
+        </button>` : ''}
     </div>
 
     <div class="branch-info" id="branchInfo" style="display:none;">
@@ -895,6 +910,13 @@ export class IssueDetailPanel {
         document.getElementById('developBtn').addEventListener('click', () => {
             vscode.postMessage({ command: 'develop' });
         });
+
+        const openInJiraBtn = document.getElementById('openInJiraBtn');
+        if (openInJiraBtn) {
+            openInJiraBtn.addEventListener('click', () => {
+                vscode.postMessage({ command: 'openInJira' });
+            });
+        }
 
         // ── Branch state management ──
         const ISSUE_KEY = '${this.escapeHtml(issue.key)}';

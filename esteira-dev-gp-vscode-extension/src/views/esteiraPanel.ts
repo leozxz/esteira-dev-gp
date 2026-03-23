@@ -203,9 +203,11 @@ export class EsteiraSidebarProvider implements vscode.WebviewViewProvider {
     private async _handleJiraOpenIssue(issueKey: string): Promise<void> {
         try {
             const issue: JiraIssue = await this._jiraClient.getIssue(issueKey);
+            const tokens = await this._tokenManager.getTokens();
+            const siteUrl = tokens?.siteUrl;
             IssueDetailPanel.show(issue, this._extensionUri, this._jiraClient, () => {
                 this._loadJiraIssues();
-            });
+            }, siteUrl);
         } catch (err) {
             vscode.window.showErrorMessage(
                 `Erro ao abrir issue: ${err instanceof Error ? err.message : err}`
