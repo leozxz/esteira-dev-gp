@@ -7,7 +7,13 @@ export interface GhAuthState {
     username?: string;
 }
 
-export function getVersionamentoHtml(stage: StageInfo, ghAuth?: GhAuthState): string {
+export interface JiraCardInfo {
+    key: string;
+    url: string;
+    summary?: string;
+}
+
+export function getVersionamentoHtml(stage: StageInfo, ghAuth?: GhAuthState, jiraCard?: JiraCardInfo): string {
     const nonce = getNonce();
     const csp = buildCsp(nonce);
 
@@ -230,6 +236,40 @@ export function getVersionamentoHtml(stage: StageInfo, ghAuth?: GhAuthState): st
             padding: 4px 8px;
             font-weight: 400;
         }
+
+        .jira-card-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 12px;
+            background: color-mix(in srgb, #0065FF 12%, transparent);
+            border: 1px solid color-mix(in srgb, #0065FF 40%, transparent);
+        }
+
+        .jira-card-bar svg {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            color: #0065FF;
+        }
+
+        .jira-card-bar a {
+            color: #0065FF;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .jira-card-bar a:hover {
+            text-decoration: underline;
+        }
+
+        .jira-card-bar .jira-summary {
+            color: var(--vscode-descriptionForeground);
+            margin-left: 4px;
+        }
     `;
 
     const ghIcon = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>`;
@@ -255,6 +295,18 @@ export function getVersionamentoHtml(stage: StageInfo, ghAuth?: GhAuthState): st
         </div>`;
     }
 
+    const jiraIcon = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.53 2c0 2.4 1.97 4.35 4.35 4.35h1.78v1.7c0 2.4 1.94 4.34 4.34 4.35V2.84a.84.84 0 0 0-.84-.84H11.53zM6.77 6.8a4.36 4.36 0 0 0 4.34 4.34h1.8v1.72a4.36 4.36 0 0 0 4.34 4.34V7.63a.84.84 0 0 0-.83-.83H6.77zM2 11.6a4.35 4.35 0 0 0 4.35 4.35h1.78v1.71c0 2.4 1.94 4.35 4.34 4.35V12.44a.84.84 0 0 0-.84-.84H2z"/></svg>`;
+
+    let jiraCardHtml = '';
+    if (jiraCard) {
+        const summaryHtml = jiraCard.summary ? `<span class="jira-summary">— ${jiraCard.summary}</span>` : '';
+        jiraCardHtml = `
+        <div class="jira-card-bar">
+            ${jiraIcon}
+            <span>Card Jira: <a href="${jiraCard.url}" id="jiraCardLink">${jiraCard.key}</a>${summaryHtml}</span>
+        </div>`;
+    }
+
     const body = `
     <div class="stage-header">
         <div class="stage-icon">${stage.icon}</div>
@@ -265,6 +317,7 @@ export function getVersionamentoHtml(stage: StageInfo, ghAuth?: GhAuthState): st
     </div>
 
     ${ghAuthHtml}
+    ${jiraCardHtml}
 
     <div class="dev-cards-grid">
         ${cardsHtml}
@@ -284,6 +337,14 @@ export function getVersionamentoHtml(stage: StageInfo, ghAuth?: GhAuthState): st
         if (ghLogoutBtn) {
             ghLogoutBtn.addEventListener('click', () => {
                 vscode.postMessage({ command: 'ghLogout' });
+            });
+        }
+
+        const jiraCardLink = document.getElementById('jiraCardLink');
+        if (jiraCardLink) {
+            jiraCardLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                vscode.postMessage({ command: 'openJiraCard', url: jiraCardLink.getAttribute('href') });
             });
         }
 

@@ -1,2 +1,4 @@
 .DS_Store
 .vscode/
+.claude/
+esteira-dev-gp-vscode-extension\node_modules

@@ -3,7 +3,7 @@ import { type StageInfo } from '../data/stages';
 import { GitFlowService } from '../services/gitFlowService';
 import { GitService } from '../services/gitService';
 import { TokenManager } from '../jira/auth/tokenManager';
-import { getVersionamentoHtml, type GhAuthState } from './templates/versionamentoTemplate';
+import { getVersionamentoHtml, type GhAuthState, type JiraCardInfo } from './templates/versionamentoTemplate';
 import {
     getCreateBranchHtml,
     getCreatePrHtml,
@@ -102,6 +102,11 @@ export class VersionamentoPanel {
                 case 'openCreatePrFromMerge':
                     this._handleOpenCreatePr(message.base);
                     break;
+                case 'openJiraCard':
+                    if (message.url) {
+                        vscode.env.openExternal(vscode.Uri.parse(message.url));
+                    }
+                    break;
                 case 'openConflictUrl':
                     if (message.url) {
                         vscode.env.openExternal(vscode.Uri.parse(message.url));
@@ -118,7 +123,35 @@ export class VersionamentoPanel {
     private async _showMenu(): Promise<void> {
         if (this._panel && this._stage) {
             const ghAuth = await this._getGhAuthState();
-            this._panel.webview.html = getVersionamentoHtml(this._stage, ghAuth);
+            const jiraCard = await this._getJiraCardInfo();
+            this._panel.webview.html = getVersionamentoHtml(this._stage, ghAuth, jiraCard);
+        }
+    }
+
+    private async _getJiraCardInfo(): Promise<JiraCardInfo | undefined> {
+        try {
+            const currentBranch = this._gitService.getCurrentBranch();
+            const match = currentBranch.match(/([a-zA-Z]+-\d+)/);
+            if (!match) { return undefined; }
+
+            const issueKey = match[1].toUpperCase();
+            const tokens = await this._tokenManager.getTokens();
+            const siteUrl = tokens?.siteUrl;
+            if (!siteUrl) { return undefined; }
+
+            const url = `${siteUrl}/browse/${issueKey}`;
+            let summary: string | undefined;
+
+            if (this._jiraClient) {
+                try {
+                    const issue = await this._jiraClient.getIssue(issueKey);
+                    summary = issue.fields.summary;
+                } catch { /* Jira not available */ }
+            }
+
+            return { key: issueKey, url, summary };
+        } catch {
+            return undefined;
         }
     }
 
@@ -211,14 +244,25 @@ export class VersionamentoPanel {
             const defaultBase = preselectedBase || baseBranches[0] || 'main';
             const defaultTitle = `${currentBranch} -> ${defaultBase}`;
 
-            // Auto-fill: description from Jira card title
+            // Auto-fill: description from Jira card title + link
             let defaultBody = '';
             const issueKeyMatch = currentBranch.match(/([a-zA-Z]+-\d+)/);
-            if (issueKeyMatch && this._jiraClient) {
-                try {
-                    const issue = await this._jiraClient.getIssue(issueKeyMatch[1].toUpperCase());
-                    defaultBody = issue.fields.summary;
-                } catch { /* Jira not available or issue not found */ }
+            if (issueKeyMatch) {
+                const issueKey = issueKeyMatch[1].toUpperCase();
+                const tokens = await this._tokenManager.getTokens();
+                const siteUrl = tokens?.siteUrl;
+
+                if (this._jiraClient) {
+                    try {
+                        const issue = await this._jiraClient.getIssue(issueKey);
+                        defaultBody = issue.fields.summary;
+                    } catch { /* Jira not available or issue not found */ }
+                }
+
+                if (siteUrl) {
+                    const jiraLink = `${siteUrl}/browse/${issueKey}`;
+                    defaultBody += `\n\n---\nJira: [${issueKey}](${jiraLink})`;
+                }
             }
 
             this._panel.webview.html = getCreatePrHtml({
@@ -265,6 +309,10 @@ export class VersionamentoPanel {
             if (!match) { return body; }
 
             const issueKey = match[1].toUpperCase();
+
+            // Skip if the body already contains a Jira link for this issue
+            if (body.includes(`/browse/${issueKey}`)) { return body; }
+
             const tokens = await this._tokenManager.getTokens();
             const siteUrl = tokens?.siteUrl;
 
