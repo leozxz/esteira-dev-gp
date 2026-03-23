@@ -11,16 +11,19 @@ import {
 } from './templates/gitFlowTemplates';
 import { getDeployPrListHtml, type DeployPrListState } from './templates/deployPrListTemplate';
 import { getDeployPrDetailHtml, type DeployPrDetailState } from './templates/deployPrDetailTemplate';
+import { JiraClient } from '../jira/api/jiraClient';
 
 export class VersionamentoPanel {
     private _panel: vscode.WebviewPanel | undefined;
     private _stage: StageInfo | undefined;
     private _gitFlowService: GitFlowService;
     private _gitService: GitService;
+    private _jiraClient: JiraClient | undefined;
 
-    constructor() {
+    constructor(jiraClient?: JiraClient) {
         this._gitFlowService = new GitFlowService();
         this._gitService = new GitService();
+        this._jiraClient = jiraClient;
     }
 
     open(stage: StageInfo): void {
@@ -94,6 +97,9 @@ export class VersionamentoPanel {
                     break;
                 case 'executeMerge':
                     this._handleMergePr(message.prNumber, message.method);
+                    break;
+                case 'openCreatePrFromMerge':
+                    this._handleOpenCreatePr(message.base);
                     break;
                 case 'openConflictUrl':
                     if (message.url) {
@@ -186,7 +192,7 @@ export class VersionamentoPanel {
 
     // ── Create PR Handlers ───────────────────────────────────────
 
-    private async _handleOpenCreatePr(): Promise<void> {
+    private async _handleOpenCreatePr(preselectedBase?: string): Promise<void> {
         if (!this._panel) { return; }
         try {
             const currentBranch = await this._gitFlowService.getCurrentBranch();
@@ -199,7 +205,28 @@ export class VersionamentoPanel {
                 ...priority.filter(b => remoteBranches.includes(b)),
                 ...remoteBranches.filter(b => !priority.includes(b)),
             ];
-            this._panel.webview.html = getCreatePrHtml({ currentBranch, baseBranches });
+
+            // Auto-fill: title = "branchName -> baseBranch"
+            const defaultBase = preselectedBase || baseBranches[0] || 'main';
+            const defaultTitle = `${currentBranch} -> ${defaultBase}`;
+
+            // Auto-fill: description from Jira card title
+            let defaultBody = '';
+            const issueKeyMatch = currentBranch.match(/([a-zA-Z]+-\d+)/);
+            if (issueKeyMatch && this._jiraClient) {
+                try {
+                    const issue = await this._jiraClient.getIssue(issueKeyMatch[1].toUpperCase());
+                    defaultBody = issue.fields.summary;
+                } catch { /* Jira not available or issue not found */ }
+            }
+
+            this._panel.webview.html = getCreatePrHtml({
+                currentBranch,
+                baseBranches,
+                defaultTitle,
+                defaultBody,
+                preselectedBase: preselectedBase,
+            });
         } catch {
             this._panel.webview.html = getCreatePrHtml({ currentBranch: 'unknown', baseBranches: ['hml', 'main'] });
         }

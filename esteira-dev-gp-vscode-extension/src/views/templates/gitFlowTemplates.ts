@@ -449,6 +449,8 @@ export function getMergeHmlHtml(state: MergeViewState): string {
             <button class="btn-execute" id="btnMergeHml">Verificar e Preparar Merge → HML</button>
 
             <div class="output-area" id="output"></div>
+
+            <button class="btn-execute" id="btnOpenPr" style="display:none;margin-top:12px;background:#238636;">Abrir Pull Request → HML</button>
         </div>
     </div>`;
 
@@ -457,6 +459,10 @@ export function getMergeHmlHtml(state: MergeViewState): string {
 
         document.getElementById('backBtn').addEventListener('click', () => {
             vscode.postMessage({ command: 'backToMenu' });
+        });
+
+        document.getElementById('btnOpenPr').addEventListener('click', () => {
+            vscode.postMessage({ command: 'openCreatePrFromMerge', base: 'hml' });
         });
 
         document.getElementById('btnMergeHml').addEventListener('click', () => {
@@ -483,13 +489,20 @@ export function getMergeHmlHtml(state: MergeViewState): string {
                 let html = '<span class="info">\\u2139\\ufe0f ' + esc(r.message) + '</span>';
                 if (r.suggestion) html += '\\n\\n<span class="info">' + esc(r.suggestion) + '</span>';
                 showOutput(html);
+                showPrButton();
                 return;
             }
             if (r.hasConflicts) {
                 showOutput('<span class="warning">\\u26a0\\ufe0f ' + esc(r.message) + '</span>\\n\\n<span class="info">' + esc(r.suggestion) + '</span>');
             } else {
                 showOutput('<span class="success">\\u2705 ' + esc(r.message) + '</span>\\n\\n<span class="info">' + esc(r.suggestion) + '</span>');
+                showPrButton();
             }
+        }
+
+        function showPrButton() {
+            var btn = document.getElementById('btnOpenPr');
+            if (btn) btn.style.display = 'block';
         }
 
         function showOutput(html) {
@@ -530,6 +543,9 @@ export function getMergeHmlHtml(state: MergeViewState): string {
 export interface CreatePrViewState {
     currentBranch: string;
     baseBranches: string[];
+    defaultTitle?: string;
+    defaultBody?: string;
+    preselectedBase?: string;
 }
 
 export function getCreatePrHtml(state: CreatePrViewState): string {
@@ -540,8 +556,9 @@ export function getCreatePrHtml(state: CreatePrViewState): string {
 
     const PR_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>`;
 
+    const selectedBase = state.preselectedBase || 'hml';
     const branchOptions = state.baseBranches.map(b =>
-        `<option value="${escapeHtml(b)}" ${b === 'hml' ? 'selected' : ''}>${escapeHtml(b)}</option>`
+        `<option value="${escapeHtml(b)}" ${b === selectedBase ? 'selected' : ''}>${escapeHtml(b)}</option>`
     ).join('\n');
 
     const body = `
@@ -571,10 +588,10 @@ export function getCreatePrHtml(state: CreatePrViewState): string {
             </select>
 
             <label>Titulo do PR</label>
-            <input type="text" id="prTitle" placeholder="Titulo do Pull Request" />
+            <input type="text" id="prTitle" placeholder="Titulo do Pull Request" value="${escapeHtml(state.defaultTitle || '')}" />
 
             <label>Descricao (opcional)</label>
-            <textarea id="prBody" rows="4" style="width:100%;padding:7px 10px;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:6px;font-size:13px;font-family:inherit;margin-bottom:12px;resize:vertical;"></textarea>
+            <textarea id="prBody" rows="4" style="width:100%;padding:7px 10px;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:6px;font-size:13px;font-family:inherit;margin-bottom:12px;resize:vertical;">${escapeHtml(state.defaultBody || '')}</textarea>
 
             <button class="btn-execute" id="btnCreatePr">Criar Pull Request</button>
 
@@ -585,8 +602,15 @@ export function getCreatePrHtml(state: CreatePrViewState): string {
     const script = `
         const vscode = acquireVsCodeApi();
 
+        const CURRENT_BRANCH = '${escapeHtml(state.currentBranch)}';
+
         document.getElementById('backBtn').addEventListener('click', () => {
             vscode.postMessage({ command: 'backToMenu' });
+        });
+
+        document.getElementById('baseBranch').addEventListener('change', () => {
+            const base = document.getElementById('baseBranch').value;
+            document.getElementById('prTitle').value = CURRENT_BRANCH + ' -> ' + base;
         });
 
         document.getElementById('btnCreatePr').addEventListener('click', () => {
@@ -677,6 +701,8 @@ export function getMergeMainHtml(state: MergeViewState): string {
             <button class="btn-execute" id="btnMergeMain">Verificar e Preparar Merge → Main</button>
 
             <div class="output-area" id="output"></div>
+
+            <button class="btn-execute" id="btnOpenPr" style="display:none;margin-top:12px;background:#238636;">Abrir Pull Request → Main</button>
         </div>
     </div>`;
 
@@ -685,6 +711,10 @@ export function getMergeMainHtml(state: MergeViewState): string {
 
         document.getElementById('backBtn').addEventListener('click', () => {
             vscode.postMessage({ command: 'backToMenu' });
+        });
+
+        document.getElementById('btnOpenPr').addEventListener('click', () => {
+            vscode.postMessage({ command: 'openCreatePrFromMerge', base: 'main' });
         });
 
         document.getElementById('btnMergeMain').addEventListener('click', () => {
@@ -711,13 +741,20 @@ export function getMergeMainHtml(state: MergeViewState): string {
                 let html = '<span class="info">\\u2139\\ufe0f ' + esc(r.message) + '</span>';
                 if (r.suggestion) html += '\\n\\n<span class="info">' + esc(r.suggestion) + '</span>';
                 showOutput(html);
+                showPrButton();
                 return;
             }
             if (r.hasConflicts) {
                 showOutput('<span class="warning">\\u26a0\\ufe0f ' + esc(r.message) + '</span>\\n\\n<span class="info">' + esc(r.suggestion) + '</span>');
             } else {
                 showOutput('<span class="success">\\u2705 ' + esc(r.message) + '</span>\\n\\n<span class="info">' + esc(r.suggestion) + '</span>');
+                showPrButton();
             }
+        }
+
+        function showPrButton() {
+            var btn = document.getElementById('btnOpenPr');
+            if (btn) btn.style.display = 'block';
         }
 
         function showOutput(html) {
