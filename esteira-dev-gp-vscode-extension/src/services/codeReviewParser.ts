@@ -71,7 +71,8 @@ function tryParseJson(output: string): Partial<CodeReviewResult> | null {
 }
 
 function parseScoreFromLine(line: string): number {
-    const m = line.match(/(\d+(?:\.\d+)?)\s*\/\s*10/);
+    // Handle bold markdown around scores: **8**/10, **8.5**/10, 8/10, 8.5/10
+    const m = line.match(/(\d+(?:\.\d+)?)\s*\*{0,2}\s*\/\s*10/);
     return m ? clamp(Number(m[1])) : 0;
 }
 
@@ -133,9 +134,24 @@ function tryParseMarkdown(output: string): Partial<CodeReviewResult> {
         }
     }
 
-    const qualityAvg = avg(qualityScores);
-    const securityAvg = avg(securityScores);
-    const finalScore = clamp(qualityAvg * 0.4 + securityAvg * 0.6);
+    // Try to extract explicit averages from the output (e.g., "NOTA GERAL DE QUALIDADE: 5.9/10")
+    let qualityAvg = avg(qualityScores);
+    let securityAvg = avg(securityScores);
+    let finalScore = clamp(qualityAvg * 0.4 + securityAvg * 0.6);
+
+    for (const line of lines) {
+        const lower = line.toLowerCase();
+        if (lower.includes('nota') && lower.includes('qualidade') && line.includes('/10')) {
+            const explicit = parseScoreFromLine(line);
+            if (explicit > 0) { qualityAvg = explicit; }
+        } else if (lower.includes('nota') && lower.includes('seguran') && line.includes('/10')) {
+            const explicit = parseScoreFromLine(line);
+            if (explicit > 0) { securityAvg = explicit; }
+        } else if (lower.includes('nota final') && line.includes('/10')) {
+            const explicit = parseScoreFromLine(line);
+            if (explicit > 0) { finalScore = explicit; }
+        }
+    }
 
     const criticalProblems = extractList(output, /###?\s*TOP\s*3\s*PROBLEMAS\s*CR[ÍI]TICOS/i);
     const recommendations = extractList(output, /###?\s*RECOMENDA[ÇC][ÕO]ES\s*PRIORIT[ÁA]RIAS/i);
