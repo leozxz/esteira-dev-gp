@@ -123,7 +123,12 @@ export function getDeployPrDetailHtml(state: DeployPrDetailState): string {
             const statusIcon = f.status === 'added' ? '+' : f.status === 'removed' ? '−' : '●';
             const statusClass = `file-status-${f.status === 'added' ? 'added' : f.status === 'removed' ? 'removed' : 'modified'}`;
             const patchContent = f.patch
-                ? escapeHtml(f.patch).replace(/\n/g, '<br>')
+                ? escapeHtml(f.patch).split('\n').map(line => {
+                    if (line.startsWith('+')) { return `<span class="diff-add">${line}</span>`; }
+                    if (line.startsWith('-')) { return `<span class="diff-del">${line}</span>`; }
+                    if (line.startsWith('@@')) { return `<span class="diff-hunk">${line}</span>`; }
+                    return line;
+                }).join('\n')
                 : '<span class="no-diff">Conteúdo binário ou sem diff disponível</span>';
 
             return `
@@ -583,13 +588,33 @@ export function getDeployPrDetailHtml(state: DeployPrDetailState): string {
             margin: 0;
             padding: 12px;
             font-size: 11px;
-            line-height: 1.5;
+            line-height: 1.6;
             font-family: var(--vscode-editor-font-family, monospace);
             overflow-x: auto;
-            white-space: pre-wrap;
-            word-break: break-all;
+            white-space: pre;
             background: var(--vscode-editor-background);
             color: var(--vscode-editor-foreground);
+        }
+
+        .diff-add {
+            display: inline-block;
+            width: 100%;
+            background: rgba(34, 134, 58, 0.15);
+            color: #22863a;
+        }
+
+        .diff-del {
+            display: inline-block;
+            width: 100%;
+            background: rgba(203, 36, 54, 0.15);
+            color: #cb2436;
+        }
+
+        .diff-hunk {
+            display: inline-block;
+            width: 100%;
+            color: var(--vscode-descriptionForeground);
+            background: rgba(139, 92, 246, 0.08);
         }
 
         .no-diff {
