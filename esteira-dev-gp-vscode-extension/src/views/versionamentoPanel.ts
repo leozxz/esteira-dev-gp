@@ -83,6 +83,9 @@ export class VersionamentoPanel {
                 case 'executeCreatePr':
                     this._handleExecuteCreatePr(message.base, message.title, message.body);
                     break;
+                case 'previewDiff':
+                    this._handlePreviewDiff(message.base);
+                    break;
                 // ── PR List & Detail ──
                 case 'openPrList':
                     this._renderPrListView();
@@ -277,6 +280,18 @@ export class VersionamentoPanel {
         }
     }
 
+    private async _handlePreviewDiff(base: string): Promise<void> {
+        if (!this._panel) { return; }
+        try {
+            const head = this._gitService.getCurrentBranch();
+            const data = this._gitService.getDiffBetweenBranches(base, head);
+            this._panel.webview.postMessage({ command: 'diffPreviewResult', success: true, data });
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this._panel.webview.postMessage({ command: 'diffPreviewResult', success: false, error: msg });
+        }
+    }
+
     private async _handleExecuteCreatePr(base: string, title: string, body: string): Promise<void> {
         if (!this._panel) { return; }
         try {
@@ -376,6 +391,7 @@ export class VersionamentoPanel {
                     statusCheckRollup: [],
                     comments: [],
                     reviews: [],
+                    files: [],
                 },
                 error: msg,
             };

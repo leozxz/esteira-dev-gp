@@ -593,6 +593,13 @@ export function getCreatePrHtml(state: CreatePrViewState): string {
             <label>Descricao (opcional)</label>
             <textarea id="prBody" rows="4" style="width:100%;padding:7px 10px;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:6px;font-size:13px;font-family:inherit;margin-bottom:12px;resize:vertical;">${escapeHtml(state.defaultBody || '')}</textarea>
 
+            <button class="btn-secondary" id="btnPreviewDiff" style="margin-bottom:8px;background:var(--vscode-button-secondaryBackground,#3a3d41);color:var(--vscode-button-secondaryForeground,#ccc);border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;width:100%;display:flex;align-items:center;justify-content:center;gap:6px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M12 3v18"/><path d="M3 12h18"/><path d="M3 6h18"/><path d="M3 18h18"/></svg>
+                Ver Alteracoes
+            </button>
+
+            <div id="diffPreview" style="display:none;margin-bottom:12px;"></div>
+
             <button class="btn-execute" id="btnCreatePr">Criar Pull Request</button>
 
             <div class="output-area" id="output"></div>
@@ -611,6 +618,15 @@ export function getCreatePrHtml(state: CreatePrViewState): string {
         document.getElementById('baseBranch').addEventListener('change', () => {
             const base = document.getElementById('baseBranch').value;
             document.getElementById('prTitle').value = CURRENT_BRANCH + ' -> ' + base;
+        });
+
+        document.getElementById('btnPreviewDiff').addEventListener('click', () => {
+            const base = document.getElementById('baseBranch').value;
+            const btn = document.getElementById('btnPreviewDiff');
+            btn.dataset.originalText = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner"></span> Carregando...';
+            btn.disabled = true;
+            vscode.postMessage({ command: 'previewDiff', base });
         });
 
         document.getElementById('btnCreatePr').addEventListener('click', () => {
@@ -634,6 +650,116 @@ export function getCreatePrHtml(state: CreatePrViewState): string {
                 } else {
                     showOutput('<span class="error">\\u274c ' + esc(msg.error) + '</span>');
                 }
+            }
+            if (msg.command === 'diffPreviewResult') {
+                const btn = document.getElementById('btnPreviewDiff');
+                btn.innerHTML = btn.dataset.originalText || 'Ver Alteracoes';
+                btn.disabled = false;
+                const container = document.getElementById('diffPreview');
+                if (!msg.success) {
+                    container.style.display = 'block';
+                    container.innerHTML = '<div style="padding:12px;background:var(--vscode-inputValidation-errorBackground,#5a1d1d);border:1px solid var(--vscode-inputValidation-errorBorder,#be1100);border-radius:6px;font-size:13px;">' + esc(msg.error) + '</div>';
+                    return;
+                }
+                const data = msg.data;
+                let html = '';
+
+                // Files section (collapsible with inline diff, grouped by folder)
+                if (data.files && data.files.length > 0) {
+                    var totalAdd = 0, totalDel = 0;
+                    data.files.forEach(function(f) { totalAdd += f.additions; totalDel += f.deletions; });
+
+                    // Group files by folder
+                    var folders = {};
+                    data.files.forEach(function(f, idx) {
+                        var lastSlash = f.file.lastIndexOf('/');
+                        var folder = lastSlash >= 0 ? f.file.substring(0, lastSlash) : '.';
+                        var fileName = lastSlash >= 0 ? f.file.substring(lastSlash + 1) : f.file;
+                        if (!folders[folder]) { folders[folder] = []; }
+                        folders[folder].push({ f: f, idx: idx, fileName: fileName });
+                    });
+                    var folderKeys = Object.keys(folders).sort();
+
+                    html += '<div><div class="diff-section-header" data-diff-toggle="diff-files-list" style="font-weight:600;font-size:13px;margin-bottom:6px;color:var(--vscode-foreground);cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none;">';
+                    html += '<svg class="diff-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;transition:transform 0.2s ease;transform:rotate(90deg);"><polyline points="9 18 15 12 9 6"/></svg>';
+                    html += 'Arquivos alterados (' + data.files.length + ') &nbsp;<span style="color:#3fb950;font-size:12px;">+' + totalAdd + '</span> <span style="color:#f85149;font-size:12px;">-' + totalDel + '</span></div>';
+                    html += '<div id="diff-files-list" style="border:1px solid var(--vscode-panel-border,var(--vscode-widget-border));border-radius:6px;overflow:hidden;">';
+
+                    folderKeys.forEach(function(folder, folderIdx) {
+                        var folderFiles = folders[folder];
+                        var folderAdd = 0, folderDel = 0;
+                        folderFiles.forEach(function(item) { folderAdd += item.f.additions; folderDel += item.f.deletions; });
+
+                        html += '<div style="border-bottom:1px solid var(--vscode-panel-border,var(--vscode-widget-border));">';
+                        // Folder header
+                        html += '<div data-diff-toggle="diff-folder-' + folderIdx + '" style="padding:6px 10px;font-size:12px;display:flex;gap:8px;align-items:center;cursor:pointer;user-select:none;background:var(--vscode-sideBar-background,var(--vscode-editor-background));" onmouseover="this.style.opacity=\\'0.8\\'" onmouseout="this.style.opacity=\\'1\\'">';
+                        html += '<svg class="diff-file-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;flex-shrink:0;transition:transform 0.2s ease;"><polyline points="9 18 15 12 9 6"/></svg>';
+                        html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;flex-shrink:0;color:var(--vscode-descriptionForeground);"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+                        html += '<span style="flex:1;font-weight:600;font-family:var(--vscode-editor-font-family,monospace);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(folder) + '</span>';
+                        html += '<span style="color:var(--vscode-descriptionForeground);font-size:11px;margin-right:4px;">' + folderFiles.length + ' arquivo' + (folderFiles.length > 1 ? 's' : '') + '</span>';
+                        html += '<span style="color:#3fb950;font-size:11px;">+' + folderAdd + '</span>';
+                        html += '<span style="color:#f85149;font-size:11px;">-' + folderDel + '</span>';
+                        html += '</div>';
+
+                        // Folder content (files)
+                        html += '<div id="diff-folder-' + folderIdx + '" style="display:none;">';
+                        folderFiles.forEach(function(item) {
+                            var f = item.f;
+                            var idx = item.idx;
+                            var statusLabel = f.status === 'A' ? 'A' : f.status === 'D' ? 'D' : f.status === 'R' ? 'R' : 'M';
+                            var statusColor = f.status === 'A' ? '#3fb950' : f.status === 'D' ? '#f85149' : f.status === 'R' ? '#d29922' : '#58a6ff';
+                            html += '<div style="border-top:1px solid var(--vscode-panel-border,var(--vscode-widget-border));">';
+                            html += '<div data-diff-toggle="diff-file-patch-' + idx + '" style="padding:5px 10px 5px 30px;font-size:12px;display:flex;gap:8px;align-items:center;cursor:pointer;user-select:none;" onmouseover="this.style.background=\\'var(--vscode-list-hoverBackground,rgba(255,255,255,0.04))\\'" onmouseout="this.style.background=\\'\\'">';
+                            html += '<svg class="diff-file-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;flex-shrink:0;transition:transform 0.2s ease;"><polyline points="9 18 15 12 9 6"/></svg>';
+                            html += '<span style="background:' + statusColor + '22;color:' + statusColor + ';padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600;min-width:16px;text-align:center;">' + statusLabel + '</span>';
+                            html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--vscode-editor-font-family,monospace);">' + esc(item.fileName) + '</span>';
+                            html += '<span style="color:#3fb950;font-size:11px;">+' + f.additions + '</span>';
+                            html += '<span style="color:#f85149;font-size:11px;">-' + f.deletions + '</span>';
+                            html += '</div>';
+                            // Inline diff patch
+                            var patchHtml = '';
+                            if (f.patch) {
+                                patchHtml = esc(f.patch).split('\\n').map(function(line) {
+                                    if (line.startsWith('+')) return '<span style="display:inline-block;width:100%;background:rgba(34,134,58,0.15);color:#3fb950;">' + line + '</span>';
+                                    if (line.startsWith('-')) return '<span style="display:inline-block;width:100%;background:rgba(203,36,54,0.15);color:#f85149;">' + line + '</span>';
+                                    if (line.startsWith('@@')) return '<span style="display:inline-block;width:100%;color:var(--vscode-descriptionForeground);background:rgba(139,92,246,0.08);">' + line + '</span>';
+                                    return line;
+                                }).join('\\n');
+                            } else {
+                                patchHtml = '<span style="color:var(--vscode-descriptionForeground);font-style:italic;">Conteudo binario ou sem diff disponivel</span>';
+                            }
+                            html += '<div id="diff-file-patch-' + idx + '" style="display:none;border-top:1px solid var(--vscode-panel-border,var(--vscode-widget-border));">';
+                            html += '<pre style="margin:0;padding:12px;font-size:11px;line-height:1.6;font-family:var(--vscode-editor-font-family,monospace);overflow-x:auto;white-space:pre;background:var(--vscode-editor-background);color:var(--vscode-editor-foreground);">' + patchHtml + '</pre>';
+                            html += '</div>';
+                            html += '</div>';
+                        });
+                        html += '</div>';
+                        html += '</div>';
+                    });
+                    html += '</div></div>';
+                }
+
+                if (!html) {
+                    html = '<div style="padding:12px;color:var(--vscode-descriptionForeground);font-size:13px;">Nenhuma alteracao encontrada entre as branches.</div>';
+                }
+
+                container.style.display = 'block';
+                container.innerHTML = html;
+
+                // Attach collapsible toggle handlers
+                container.querySelectorAll('[data-diff-toggle]').forEach(function(el) {
+                    el.addEventListener('click', function() {
+                        var targetId = el.getAttribute('data-diff-toggle');
+                        var target = document.getElementById(targetId);
+                        if (!target) return;
+                        var isHidden = target.style.display === 'none';
+                        target.style.display = isHidden ? 'block' : 'none';
+                        var chevron = el.querySelector('.diff-section-chevron, .diff-file-chevron');
+                        if (chevron) {
+                            chevron.style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
+                        }
+                    });
+                });
             }
         });
 

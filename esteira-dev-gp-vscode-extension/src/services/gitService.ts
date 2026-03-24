@@ -41,6 +41,14 @@ export interface GhStatusCheck {
     conclusion: string;  // SUCCESS, FAILURE, NEUTRAL, etc.
 }
 
+export interface GhPrFile {
+    filename: string;
+    status: string;       // added, removed, modified, renamed, copied
+    additions: number;
+    deletions: number;
+    patch?: string;       // unified diff patch for the file
+}
+
 export interface GhPrDetail {
     number: number;
     title: string;
@@ -57,6 +65,7 @@ export interface GhPrDetail {
     statusCheckRollup: GhStatusCheck[];
     comments: GhPrComment[];
     reviews: GhPrReview[];
+    files: GhPrFile[];
 }
 
 export class GitService {
@@ -355,6 +364,77 @@ export class GitService {
         return this._exec('git diff --cached');
     }
 
+    getDiffBetweenBranches(base: string, head: string): { files: { file: string; status: string; additions: number; deletions: number; patch?: string }[]; commits: { hash: string; message: string; author: string }[]; stats: string } {
+        const safeBase = this._sanitize(base);
+        const safeHead = this._sanitize(head);
+
+        // Get list of changed files with stats
+        const numstat = this._exec(`git diff --numstat origin/${base}...origin/${head}`).trim();
+        const nameStatus = this._exec(`git diff --name-status origin/${base}...origin/${head}`).trim();
+
+        const statusMap = new Map<string, string>();
+        if (nameStatus) {
+            for (const line of nameStatus.split('\n')) {
+                const parts = line.split('\t');
+                if (parts.length >= 2) {
+                    const status = parts[0].charAt(0);
+                    const file = parts[parts.length - 1];
+                    statusMap.set(file, status);
+                }
+            }
+        }
+
+        // Get per-file patches
+        const patchMap = new Map<string, string>();
+        try {
+            const fullDiff = this._exec(`git diff origin/${base}...origin/${head}`);
+            const fileDiffs = fullDiff.split(/^diff --git /m).filter(Boolean);
+            for (const chunk of fileDiffs) {
+                const headerEnd = chunk.indexOf('\n');
+                const header = chunk.substring(0, headerEnd);
+                const match = header.match(/b\/(.+)$/);
+                if (match) {
+                    const fileName = match[1];
+                    // Skip the "diff --git" header line, keep from --- onwards
+                    const patchStart = chunk.indexOf('\n---');
+                    if (patchStart !== -1) {
+                        patchMap.set(fileName, chunk.substring(patchStart + 1));
+                    }
+                }
+            }
+        } catch { /* non-critical */ }
+
+        const files: { file: string; status: string; additions: number; deletions: number; patch?: string }[] = [];
+        if (numstat) {
+            for (const line of numstat.split('\n')) {
+                const parts = line.split('\t');
+                if (parts.length >= 3) {
+                    const additions = parts[0] === '-' ? 0 : parseInt(parts[0], 10);
+                    const deletions = parts[1] === '-' ? 0 : parseInt(parts[1], 10);
+                    const file = parts[2];
+                    files.push({ file, status: statusMap.get(file) || 'M', additions, deletions, patch: patchMap.get(file) });
+                }
+            }
+        }
+
+        // Get commit list
+        const logRaw = this._exec(`git log origin/${base}..origin/${head} --oneline --format="%h\t%s\t%an"`).trim();
+        const commits: { hash: string; message: string; author: string }[] = [];
+        if (logRaw) {
+            for (const line of logRaw.split('\n')) {
+                const parts = line.split('\t');
+                if (parts.length >= 3) {
+                    commits.push({ hash: parts[0], message: parts[1], author: parts[2] });
+                }
+            }
+        }
+
+        // Get diffstat summary
+        const stats = this._exec(`git diff --stat origin/${base}...origin/${head}`).trim();
+
+        return { files, commits, stats };
+    }
+
     fetch(): void {
         this._exec('git fetch');
     }
@@ -396,10 +476,11 @@ export class GitService {
         }
         const { owner, repo } = this._getOwnerRepo();
 
-        const [pr, reviews, comments] = await Promise.all([
+        const [pr, reviews, comments, filesRaw] = await Promise.all([
             this._ghApi(`/repos/${owner}/${repo}/pulls/${prNumber}`) as Promise<Record<string, unknown>>,
             this._ghApi(`/repos/${owner}/${repo}/pulls/${prNumber}/reviews`) as Promise<Array<Record<string, unknown>>>,
             this._ghApi(`/repos/${owner}/${repo}/issues/${prNumber}/comments`) as Promise<Array<Record<string, unknown>>>,
+            this._ghApi(`/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`) as Promise<Array<Record<string, unknown>>>,
         ]);
 
         // Determine review decision from reviews
@@ -456,6 +537,13 @@ export class GitService {
                 body: (r.body as string) ?? '',
                 state: (r.state as string) ?? '',
                 createdAt: (r.submitted_at as string) ?? '',
+            })),
+            files: (filesRaw ?? []).map(f => ({
+                filename: (f.filename as string) ?? '',
+                status: (f.status as string) ?? 'modified',
+                additions: (f.additions as number) ?? 0,
+                deletions: (f.deletions as number) ?? 0,
+                patch: (f.patch as string) ?? undefined,
             })),
         };
     }
