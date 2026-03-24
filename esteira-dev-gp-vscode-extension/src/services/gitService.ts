@@ -41,6 +41,14 @@ export interface GhStatusCheck {
     conclusion: string;  // SUCCESS, FAILURE, NEUTRAL, etc.
 }
 
+export interface GhPrFile {
+    filename: string;
+    status: string;       // added, removed, modified, renamed, copied
+    additions: number;
+    deletions: number;
+    patch?: string;       // unified diff patch for the file
+}
+
 export interface GhPrDetail {
     number: number;
     title: string;
@@ -57,6 +65,7 @@ export interface GhPrDetail {
     statusCheckRollup: GhStatusCheck[];
     comments: GhPrComment[];
     reviews: GhPrReview[];
+    files: GhPrFile[];
 }
 
 export class GitService {
@@ -447,10 +456,11 @@ export class GitService {
         }
         const { owner, repo } = this._getOwnerRepo();
 
-        const [pr, reviews, comments] = await Promise.all([
+        const [pr, reviews, comments, filesRaw] = await Promise.all([
             this._ghApi(`/repos/${owner}/${repo}/pulls/${prNumber}`) as Promise<Record<string, unknown>>,
             this._ghApi(`/repos/${owner}/${repo}/pulls/${prNumber}/reviews`) as Promise<Array<Record<string, unknown>>>,
             this._ghApi(`/repos/${owner}/${repo}/issues/${prNumber}/comments`) as Promise<Array<Record<string, unknown>>>,
+            this._ghApi(`/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`) as Promise<Array<Record<string, unknown>>>,
         ]);
 
         // Determine review decision from reviews
@@ -507,6 +517,13 @@ export class GitService {
                 body: (r.body as string) ?? '',
                 state: (r.state as string) ?? '',
                 createdAt: (r.submitted_at as string) ?? '',
+            })),
+            files: (filesRaw ?? []).map(f => ({
+                filename: (f.filename as string) ?? '',
+                status: (f.status as string) ?? 'modified',
+                additions: (f.additions as number) ?? 0,
+                deletions: (f.deletions as number) ?? 0,
+                patch: (f.patch as string) ?? undefined,
             })),
         };
     }

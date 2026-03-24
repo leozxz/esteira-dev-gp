@@ -113,6 +113,54 @@ export function getDeployPrDetailHtml(state: DeployPrDetailState): string {
         </div>`;
     }
 
+    // ── Changed Files (collapsible) ────────────────────
+    let filesHtml = '';
+    if (pr.files.length > 0) {
+        const totalAdditions = pr.files.reduce((s, f) => s + f.additions, 0);
+        const totalDeletions = pr.files.reduce((s, f) => s + f.deletions, 0);
+
+        const fileRows = pr.files.map((f, idx) => {
+            const statusIcon = f.status === 'added' ? '+' : f.status === 'removed' ? '−' : '●';
+            const statusClass = `file-status-${f.status === 'added' ? 'added' : f.status === 'removed' ? 'removed' : 'modified'}`;
+            const patchContent = f.patch
+                ? escapeHtml(f.patch).replace(/\n/g, '<br>')
+                : '<span class="no-diff">Conteúdo binário ou sem diff disponível</span>';
+
+            return `
+            <div class="file-item" data-file-idx="${idx}">
+                <div class="file-item-header" data-toggle="file-diff-${idx}">
+                    <div class="file-item-left">
+                        <svg class="file-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        <span class="${statusClass}">${statusIcon}</span>
+                        <span class="file-name">${escapeHtml(f.filename)}</span>
+                    </div>
+                    <div class="file-item-right">
+                        <span class="file-additions">+${f.additions}</span>
+                        <span class="file-deletions">-${f.deletions}</span>
+                    </div>
+                </div>
+                <div class="file-diff-content" id="file-diff-${idx}" style="display:none;">
+                    <pre class="diff-block">${patchContent}</pre>
+                </div>
+            </div>`;
+        }).join('\n');
+
+        filesHtml = `
+        <div class="meta-card">
+            <div class="collapsible-header" data-toggle="files-section">
+                <svg class="section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                <h3 class="meta-card-title" style="margin-bottom:0;">Arquivos Alterados (${pr.files.length})</h3>
+                <span class="file-stats">
+                    <span class="file-additions">+${totalAdditions}</span>
+                    <span class="file-deletions">-${totalDeletions}</span>
+                </span>
+            </div>
+            <div class="files-section-content" id="files-section" style="display:none; margin-top:12px;">
+                ${fileRows}
+            </div>
+        </div>`;
+    }
+
     // ── Reviews & Comments timeline ─────────────────────
     type TimelineEntry = { author: string; body: string; createdAt: string; type: 'review' | 'comment'; state?: string };
 
@@ -444,6 +492,110 @@ export function getDeployPrDetailHtml(state: DeployPrDetailState): string {
             font-size: 13px;
             margin-bottom: 16px;
         }
+
+        /* Collapsible sections */
+        .collapsible-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .collapsible-header:hover { opacity: 0.8; }
+
+        .section-chevron, .file-chevron {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            transition: transform 0.2s ease;
+            color: var(--vscode-foreground);
+        }
+
+        .section-chevron.expanded, .file-chevron.expanded {
+            transform: rotate(90deg);
+        }
+
+        .file-stats {
+            margin-left: auto;
+            display: flex;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        /* File list */
+        .file-item {
+            border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
+            border-radius: 6px;
+            margin-bottom: 4px;
+            overflow: hidden;
+        }
+
+        .file-item-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s ease;
+        }
+
+        .file-item-header:hover {
+            background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.04));
+        }
+
+        .file-item-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            flex: 1;
+        }
+
+        .file-item-right {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+            font-size: 12px;
+        }
+
+        .file-name {
+            font-size: 12px;
+            font-family: var(--vscode-editor-font-family, monospace);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .file-status-added { color: #22863a; font-weight: 700; }
+        .file-status-removed { color: #cb2436; font-weight: 700; }
+        .file-status-modified { color: #dbab09; font-weight: 700; }
+
+        .file-additions { color: #22863a; font-weight: 600; }
+        .file-deletions { color: #cb2436; font-weight: 600; }
+
+        .file-diff-content {
+            border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
+        }
+
+        .diff-block {
+            margin: 0;
+            padding: 12px;
+            font-size: 11px;
+            line-height: 1.5;
+            font-family: var(--vscode-editor-font-family, monospace);
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            background: var(--vscode-editor-background);
+            color: var(--vscode-editor-foreground);
+        }
+
+        .no-diff {
+            color: var(--vscode-descriptionForeground);
+            font-style: italic;
+        }
     `;
 
     const body = `
@@ -458,6 +610,7 @@ export function getDeployPrDetailHtml(state: DeployPrDetailState): string {
     ${headerHtml}
     ${bodyHtml}
     ${checksHtml}
+    ${filesHtml}
     ${timelineHtml}
     ${mergeHtml}`;
 
@@ -475,6 +628,21 @@ export function getDeployPrDetailHtml(state: DeployPrDetailState): string {
                 vscode.postMessage({ command: 'executeMerge', prNumber: ${pr.number}, method });
             });
         }
+
+        // Collapsible toggle logic
+        document.querySelectorAll('[data-toggle]').forEach(el => {
+            el.addEventListener('click', () => {
+                const targetId = el.getAttribute('data-toggle');
+                const target = document.getElementById(targetId);
+                if (!target) return;
+                const isHidden = target.style.display === 'none';
+                target.style.display = isHidden ? 'block' : 'none';
+                const chevron = el.querySelector('.section-chevron, .file-chevron');
+                if (chevron) {
+                    chevron.classList.toggle('expanded', isHidden);
+                }
+            });
+        });
 
         const resolveBtn = document.getElementById('resolveConflictsBtn');
         if (resolveBtn) {

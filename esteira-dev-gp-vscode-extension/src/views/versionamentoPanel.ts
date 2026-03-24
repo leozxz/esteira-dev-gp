@@ -391,6 +391,7 @@ export class VersionamentoPanel {
                     statusCheckRollup: [],
                     comments: [],
                     reviews: [],
+                    files: [],
                 },
                 error: msg,
             };
