@@ -664,34 +664,76 @@ export function getCreatePrHtml(state: CreatePrViewState): string {
                 const data = msg.data;
                 let html = '';
 
-                // Commits section
-                if (data.commits && data.commits.length > 0) {
-                    html += '<div style="margin-bottom:12px;"><div style="font-weight:600;font-size:13px;margin-bottom:6px;color:var(--vscode-foreground);">Commits (' + data.commits.length + ')</div>';
-                    html += '<div style="background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border,var(--vscode-widget-border));border-radius:6px;overflow:hidden;">';
-                    data.commits.forEach(function(c) {
-                        html += '<div style="padding:6px 10px;border-bottom:1px solid var(--vscode-panel-border,var(--vscode-widget-border));font-size:12px;display:flex;gap:8px;align-items:center;">';
-                        html += '<code style="color:var(--vscode-textLink-foreground);font-size:11px;">' + esc(c.hash) + '</code>';
-                        html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(c.message) + '</span>';
-                        html += '<span style="color:var(--vscode-descriptionForeground);font-size:11px;white-space:nowrap;">' + esc(c.author) + '</span>';
-                        html += '</div>';
-                    });
-                    html += '</div></div>';
-                }
-
-                // Files section
+                // Files section (collapsible with inline diff, grouped by folder)
                 if (data.files && data.files.length > 0) {
-                    let totalAdd = 0, totalDel = 0;
+                    var totalAdd = 0, totalDel = 0;
                     data.files.forEach(function(f) { totalAdd += f.additions; totalDel += f.deletions; });
-                    html += '<div><div style="font-weight:600;font-size:13px;margin-bottom:6px;color:var(--vscode-foreground);">Arquivos alterados (' + data.files.length + ') &nbsp;<span style="color:#3fb950;font-size:12px;">+' + totalAdd + '</span> <span style="color:#f85149;font-size:12px;">-' + totalDel + '</span></div>';
-                    html += '<div style="background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border,var(--vscode-widget-border));border-radius:6px;overflow:hidden;">';
-                    data.files.forEach(function(f) {
-                        var statusLabel = f.status === 'A' ? 'A' : f.status === 'D' ? 'D' : f.status === 'R' ? 'R' : 'M';
-                        var statusColor = f.status === 'A' ? '#3fb950' : f.status === 'D' ? '#f85149' : f.status === 'R' ? '#d29922' : '#58a6ff';
-                        html += '<div style="padding:5px 10px;border-bottom:1px solid var(--vscode-panel-border,var(--vscode-widget-border));font-size:12px;display:flex;gap:8px;align-items:center;">';
-                        html += '<span style="background:' + statusColor + '22;color:' + statusColor + ';padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600;min-width:16px;text-align:center;">' + statusLabel + '</span>';
-                        html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--vscode-editor-font-family,monospace);">' + esc(f.file) + '</span>';
-                        html += '<span style="color:#3fb950;font-size:11px;">+' + f.additions + '</span>';
-                        html += '<span style="color:#f85149;font-size:11px;">-' + f.deletions + '</span>';
+
+                    // Group files by folder
+                    var folders = {};
+                    data.files.forEach(function(f, idx) {
+                        var lastSlash = f.file.lastIndexOf('/');
+                        var folder = lastSlash >= 0 ? f.file.substring(0, lastSlash) : '.';
+                        var fileName = lastSlash >= 0 ? f.file.substring(lastSlash + 1) : f.file;
+                        if (!folders[folder]) { folders[folder] = []; }
+                        folders[folder].push({ f: f, idx: idx, fileName: fileName });
+                    });
+                    var folderKeys = Object.keys(folders).sort();
+
+                    html += '<div><div class="diff-section-header" data-diff-toggle="diff-files-list" style="font-weight:600;font-size:13px;margin-bottom:6px;color:var(--vscode-foreground);cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none;">';
+                    html += '<svg class="diff-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;transition:transform 0.2s ease;transform:rotate(90deg);"><polyline points="9 18 15 12 9 6"/></svg>';
+                    html += 'Arquivos alterados (' + data.files.length + ') &nbsp;<span style="color:#3fb950;font-size:12px;">+' + totalAdd + '</span> <span style="color:#f85149;font-size:12px;">-' + totalDel + '</span></div>';
+                    html += '<div id="diff-files-list" style="border:1px solid var(--vscode-panel-border,var(--vscode-widget-border));border-radius:6px;overflow:hidden;">';
+
+                    folderKeys.forEach(function(folder, folderIdx) {
+                        var folderFiles = folders[folder];
+                        var folderAdd = 0, folderDel = 0;
+                        folderFiles.forEach(function(item) { folderAdd += item.f.additions; folderDel += item.f.deletions; });
+
+                        html += '<div style="border-bottom:1px solid var(--vscode-panel-border,var(--vscode-widget-border));">';
+                        // Folder header
+                        html += '<div data-diff-toggle="diff-folder-' + folderIdx + '" style="padding:6px 10px;font-size:12px;display:flex;gap:8px;align-items:center;cursor:pointer;user-select:none;background:var(--vscode-sideBar-background,var(--vscode-editor-background));" onmouseover="this.style.opacity=\\'0.8\\'" onmouseout="this.style.opacity=\\'1\\'">';
+                        html += '<svg class="diff-file-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;flex-shrink:0;transition:transform 0.2s ease;"><polyline points="9 18 15 12 9 6"/></svg>';
+                        html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;flex-shrink:0;color:var(--vscode-descriptionForeground);"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+                        html += '<span style="flex:1;font-weight:600;font-family:var(--vscode-editor-font-family,monospace);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(folder) + '</span>';
+                        html += '<span style="color:var(--vscode-descriptionForeground);font-size:11px;margin-right:4px;">' + folderFiles.length + ' arquivo' + (folderFiles.length > 1 ? 's' : '') + '</span>';
+                        html += '<span style="color:#3fb950;font-size:11px;">+' + folderAdd + '</span>';
+                        html += '<span style="color:#f85149;font-size:11px;">-' + folderDel + '</span>';
+                        html += '</div>';
+
+                        // Folder content (files)
+                        html += '<div id="diff-folder-' + folderIdx + '" style="display:none;">';
+                        folderFiles.forEach(function(item) {
+                            var f = item.f;
+                            var idx = item.idx;
+                            var statusLabel = f.status === 'A' ? 'A' : f.status === 'D' ? 'D' : f.status === 'R' ? 'R' : 'M';
+                            var statusColor = f.status === 'A' ? '#3fb950' : f.status === 'D' ? '#f85149' : f.status === 'R' ? '#d29922' : '#58a6ff';
+                            html += '<div style="border-top:1px solid var(--vscode-panel-border,var(--vscode-widget-border));">';
+                            html += '<div data-diff-toggle="diff-file-patch-' + idx + '" style="padding:5px 10px 5px 30px;font-size:12px;display:flex;gap:8px;align-items:center;cursor:pointer;user-select:none;" onmouseover="this.style.background=\\'var(--vscode-list-hoverBackground,rgba(255,255,255,0.04))\\'" onmouseout="this.style.background=\\'\\'">';
+                            html += '<svg class="diff-file-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;flex-shrink:0;transition:transform 0.2s ease;"><polyline points="9 18 15 12 9 6"/></svg>';
+                            html += '<span style="background:' + statusColor + '22;color:' + statusColor + ';padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600;min-width:16px;text-align:center;">' + statusLabel + '</span>';
+                            html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--vscode-editor-font-family,monospace);">' + esc(item.fileName) + '</span>';
+                            html += '<span style="color:#3fb950;font-size:11px;">+' + f.additions + '</span>';
+                            html += '<span style="color:#f85149;font-size:11px;">-' + f.deletions + '</span>';
+                            html += '</div>';
+                            // Inline diff patch
+                            var patchHtml = '';
+                            if (f.patch) {
+                                patchHtml = esc(f.patch).split('\\n').map(function(line) {
+                                    if (line.startsWith('+')) return '<span style="display:inline-block;width:100%;background:rgba(34,134,58,0.15);color:#3fb950;">' + line + '</span>';
+                                    if (line.startsWith('-')) return '<span style="display:inline-block;width:100%;background:rgba(203,36,54,0.15);color:#f85149;">' + line + '</span>';
+                                    if (line.startsWith('@@')) return '<span style="display:inline-block;width:100%;color:var(--vscode-descriptionForeground);background:rgba(139,92,246,0.08);">' + line + '</span>';
+                                    return line;
+                                }).join('\\n');
+                            } else {
+                                patchHtml = '<span style="color:var(--vscode-descriptionForeground);font-style:italic;">Conteudo binario ou sem diff disponivel</span>';
+                            }
+                            html += '<div id="diff-file-patch-' + idx + '" style="display:none;border-top:1px solid var(--vscode-panel-border,var(--vscode-widget-border));">';
+                            html += '<pre style="margin:0;padding:12px;font-size:11px;line-height:1.6;font-family:var(--vscode-editor-font-family,monospace);overflow-x:auto;white-space:pre;background:var(--vscode-editor-background);color:var(--vscode-editor-foreground);">' + patchHtml + '</pre>';
+                            html += '</div>';
+                            html += '</div>';
+                        });
+                        html += '</div>';
                         html += '</div>';
                     });
                     html += '</div></div>';
@@ -703,6 +745,21 @@ export function getCreatePrHtml(state: CreatePrViewState): string {
 
                 container.style.display = 'block';
                 container.innerHTML = html;
+
+                // Attach collapsible toggle handlers
+                container.querySelectorAll('[data-diff-toggle]').forEach(function(el) {
+                    el.addEventListener('click', function() {
+                        var targetId = el.getAttribute('data-diff-toggle');
+                        var target = document.getElementById(targetId);
+                        if (!target) return;
+                        var isHidden = target.style.display === 'none';
+                        target.style.display = isHidden ? 'block' : 'none';
+                        var chevron = el.querySelector('.diff-section-chevron, .diff-file-chevron');
+                        if (chevron) {
+                            chevron.style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
+                        }
+                    });
+                });
             }
         });
 

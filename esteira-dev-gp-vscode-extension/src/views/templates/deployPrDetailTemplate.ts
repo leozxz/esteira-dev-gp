@@ -113,39 +113,76 @@ export function getDeployPrDetailHtml(state: DeployPrDetailState): string {
         </div>`;
     }
 
-    // ── Changed Files (collapsible) ────────────────────
+    // ── Changed Files (collapsible, grouped by folder) ──
     let filesHtml = '';
     if (pr.files.length > 0) {
         const totalAdditions = pr.files.reduce((s, f) => s + f.additions, 0);
         const totalDeletions = pr.files.reduce((s, f) => s + f.deletions, 0);
 
-        const fileRows = pr.files.map((f, idx) => {
-            const statusIcon = f.status === 'added' ? '+' : f.status === 'removed' ? '−' : '●';
-            const statusClass = `file-status-${f.status === 'added' ? 'added' : f.status === 'removed' ? 'removed' : 'modified'}`;
-            const patchContent = f.patch
-                ? escapeHtml(f.patch).split('\n').map(line => {
-                    if (line.startsWith('+')) { return `<span class="diff-add">${line}</span>`; }
-                    if (line.startsWith('-')) { return `<span class="diff-del">${line}</span>`; }
-                    if (line.startsWith('@@')) { return `<span class="diff-hunk">${line}</span>`; }
-                    return line;
-                }).join('\n')
-                : '<span class="no-diff">Conteúdo binário ou sem diff disponível</span>';
+        // Group files by folder
+        const folders = new Map<string, { f: typeof pr.files[0]; idx: number; fileName: string }[]>();
+        pr.files.forEach((f, idx) => {
+            const lastSlash = f.filename.lastIndexOf('/');
+            const folder = lastSlash >= 0 ? f.filename.substring(0, lastSlash) : '.';
+            const fileName = lastSlash >= 0 ? f.filename.substring(lastSlash + 1) : f.filename;
+            if (!folders.has(folder)) { folders.set(folder, []); }
+            folders.get(folder)!.push({ f, idx, fileName });
+        });
+        const folderKeys = [...folders.keys()].sort();
+
+        const folderRows = folderKeys.map((folder, folderIdx) => {
+            const folderFiles = folders.get(folder)!;
+            const folderAdd = folderFiles.reduce((s, item) => s + item.f.additions, 0);
+            const folderDel = folderFiles.reduce((s, item) => s + item.f.deletions, 0);
+
+            const fileItems = folderFiles.map(item => {
+                const f = item.f;
+                const statusIcon = f.status === 'added' ? '+' : f.status === 'removed' ? '−' : '●';
+                const statusClass = `file-status-${f.status === 'added' ? 'added' : f.status === 'removed' ? 'removed' : 'modified'}`;
+                const patchContent = f.patch
+                    ? escapeHtml(f.patch).split('\n').map(line => {
+                        if (line.startsWith('+')) { return `<span class="diff-add">${line}</span>`; }
+                        if (line.startsWith('-')) { return `<span class="diff-del">${line}</span>`; }
+                        if (line.startsWith('@@')) { return `<span class="diff-hunk">${line}</span>`; }
+                        return line;
+                    }).join('\n')
+                    : '<span class="no-diff">Conteúdo binário ou sem diff disponível</span>';
+
+                return `
+                <div class="file-item-inner">
+                    <div class="file-item-header" data-toggle="file-diff-${item.idx}">
+                        <div class="file-item-left">
+                            <svg class="file-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                            <span class="${statusClass}">${statusIcon}</span>
+                            <span class="file-name">${escapeHtml(item.fileName)}</span>
+                        </div>
+                        <div class="file-item-right">
+                            <span class="file-additions">+${f.additions}</span>
+                            <span class="file-deletions">-${f.deletions}</span>
+                        </div>
+                    </div>
+                    <div class="file-diff-content" id="file-diff-${item.idx}" style="display:none;">
+                        <pre class="diff-block">${patchContent}</pre>
+                    </div>
+                </div>`;
+            }).join('\n');
 
             return `
-            <div class="file-item" data-file-idx="${idx}">
-                <div class="file-item-header" data-toggle="file-diff-${idx}">
+            <div class="folder-group">
+                <div class="folder-header" data-toggle="folder-${folderIdx}">
                     <div class="file-item-left">
                         <svg class="file-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-                        <span class="${statusClass}">${statusIcon}</span>
-                        <span class="file-name">${escapeHtml(f.filename)}</span>
+                        <svg class="folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                        <span class="folder-name">${escapeHtml(folder)}</span>
+                        <span class="folder-count">${folderFiles.length} arquivo${folderFiles.length > 1 ? 's' : ''}</span>
                     </div>
                     <div class="file-item-right">
-                        <span class="file-additions">+${f.additions}</span>
-                        <span class="file-deletions">-${f.deletions}</span>
+                        <span class="file-additions">+${folderAdd}</span>
+                        <span class="file-deletions">-${folderDel}</span>
                     </div>
                 </div>
-                <div class="file-diff-content" id="file-diff-${idx}" style="display:none;">
-                    <pre class="diff-block">${patchContent}</pre>
+                <div class="folder-content" id="folder-${folderIdx}" style="display:none;">
+                    ${fileItems}
                 </div>
             </div>`;
         }).join('\n');
@@ -161,7 +198,7 @@ export function getDeployPrDetailHtml(state: DeployPrDetailState): string {
                 </span>
             </div>
             <div class="files-section-content" id="files-section" style="display:none; margin-top:12px;">
-                ${fileRows}
+                ${folderRows}
             </div>
         </div>`;
     }
@@ -528,19 +565,63 @@ export function getDeployPrDetailHtml(state: DeployPrDetailState): string {
             font-size: 12px;
         }
 
-        /* File list */
-        .file-item {
+        /* Folder groups */
+        .folder-group {
             border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
             border-radius: 6px;
             margin-bottom: 4px;
             overflow: hidden;
         }
 
-        .file-item-header {
+        .folder-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
             padding: 8px 12px;
+            cursor: pointer;
+            user-select: none;
+            background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+            transition: opacity 0.15s ease;
+        }
+
+        .folder-header:hover { opacity: 0.8; }
+
+        .folder-icon {
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+            color: var(--vscode-descriptionForeground);
+        }
+
+        .folder-name {
+            font-size: 12px;
+            font-weight: 600;
+            font-family: var(--vscode-editor-font-family, monospace);
+        }
+
+        .folder-count {
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            margin-left: 4px;
+        }
+
+        .folder-content {
+            border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
+        }
+
+        .file-item-inner {
+            border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
+        }
+
+        .file-item-inner:first-child {
+            border-top: none;
+        }
+
+        .file-item-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 12px 6px 28px;
             cursor: pointer;
             user-select: none;
             transition: background 0.15s ease;

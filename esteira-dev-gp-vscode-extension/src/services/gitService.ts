@@ -364,7 +364,7 @@ export class GitService {
         return this._exec('git diff --cached');
     }
 
-    getDiffBetweenBranches(base: string, head: string): { files: { file: string; status: string; additions: number; deletions: number }[]; commits: { hash: string; message: string; author: string }[]; stats: string } {
+    getDiffBetweenBranches(base: string, head: string): { files: { file: string; status: string; additions: number; deletions: number; patch?: string }[]; commits: { hash: string; message: string; author: string }[]; stats: string } {
         const safeBase = this._sanitize(base);
         const safeHead = this._sanitize(head);
 
@@ -384,7 +384,27 @@ export class GitService {
             }
         }
 
-        const files: { file: string; status: string; additions: number; deletions: number }[] = [];
+        // Get per-file patches
+        const patchMap = new Map<string, string>();
+        try {
+            const fullDiff = this._exec(`git diff origin/${base}...origin/${head}`);
+            const fileDiffs = fullDiff.split(/^diff --git /m).filter(Boolean);
+            for (const chunk of fileDiffs) {
+                const headerEnd = chunk.indexOf('\n');
+                const header = chunk.substring(0, headerEnd);
+                const match = header.match(/b\/(.+)$/);
+                if (match) {
+                    const fileName = match[1];
+                    // Skip the "diff --git" header line, keep from --- onwards
+                    const patchStart = chunk.indexOf('\n---');
+                    if (patchStart !== -1) {
+                        patchMap.set(fileName, chunk.substring(patchStart + 1));
+                    }
+                }
+            }
+        } catch { /* non-critical */ }
+
+        const files: { file: string; status: string; additions: number; deletions: number; patch?: string }[] = [];
         if (numstat) {
             for (const line of numstat.split('\n')) {
                 const parts = line.split('\t');
@@ -392,7 +412,7 @@ export class GitService {
                     const additions = parts[0] === '-' ? 0 : parseInt(parts[0], 10);
                     const deletions = parts[1] === '-' ? 0 : parseInt(parts[1], 10);
                     const file = parts[2];
-                    files.push({ file, status: statusMap.get(file) || 'M', additions, deletions });
+                    files.push({ file, status: statusMap.get(file) || 'M', additions, deletions, patch: patchMap.get(file) });
                 }
             }
         }
