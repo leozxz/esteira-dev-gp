@@ -355,6 +355,57 @@ export class GitService {
         return this._exec('git diff --cached');
     }
 
+    getDiffBetweenBranches(base: string, head: string): { files: { file: string; status: string; additions: number; deletions: number }[]; commits: { hash: string; message: string; author: string }[]; stats: string } {
+        const safeBase = this._sanitize(base);
+        const safeHead = this._sanitize(head);
+
+        // Get list of changed files with stats
+        const numstat = this._exec(`git diff --numstat origin/${base}...origin/${head}`).trim();
+        const nameStatus = this._exec(`git diff --name-status origin/${base}...origin/${head}`).trim();
+
+        const statusMap = new Map<string, string>();
+        if (nameStatus) {
+            for (const line of nameStatus.split('\n')) {
+                const parts = line.split('\t');
+                if (parts.length >= 2) {
+                    const status = parts[0].charAt(0);
+                    const file = parts[parts.length - 1];
+                    statusMap.set(file, status);
+                }
+            }
+        }
+
+        const files: { file: string; status: string; additions: number; deletions: number }[] = [];
+        if (numstat) {
+            for (const line of numstat.split('\n')) {
+                const parts = line.split('\t');
+                if (parts.length >= 3) {
+                    const additions = parts[0] === '-' ? 0 : parseInt(parts[0], 10);
+                    const deletions = parts[1] === '-' ? 0 : parseInt(parts[1], 10);
+                    const file = parts[2];
+                    files.push({ file, status: statusMap.get(file) || 'M', additions, deletions });
+                }
+            }
+        }
+
+        // Get commit list
+        const logRaw = this._exec(`git log origin/${base}..origin/${head} --oneline --format="%h\t%s\t%an"`).trim();
+        const commits: { hash: string; message: string; author: string }[] = [];
+        if (logRaw) {
+            for (const line of logRaw.split('\n')) {
+                const parts = line.split('\t');
+                if (parts.length >= 3) {
+                    commits.push({ hash: parts[0], message: parts[1], author: parts[2] });
+                }
+            }
+        }
+
+        // Get diffstat summary
+        const stats = this._exec(`git diff --stat origin/${base}...origin/${head}`).trim();
+
+        return { files, commits, stats };
+    }
+
     fetch(): void {
         this._exec('git fetch');
     }

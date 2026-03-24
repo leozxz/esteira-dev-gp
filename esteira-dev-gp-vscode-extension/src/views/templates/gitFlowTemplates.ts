@@ -593,6 +593,13 @@ export function getCreatePrHtml(state: CreatePrViewState): string {
             <label>Descricao (opcional)</label>
             <textarea id="prBody" rows="4" style="width:100%;padding:7px 10px;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:6px;font-size:13px;font-family:inherit;margin-bottom:12px;resize:vertical;">${escapeHtml(state.defaultBody || '')}</textarea>
 
+            <button class="btn-secondary" id="btnPreviewDiff" style="margin-bottom:8px;background:var(--vscode-button-secondaryBackground,#3a3d41);color:var(--vscode-button-secondaryForeground,#ccc);border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;width:100%;display:flex;align-items:center;justify-content:center;gap:6px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M12 3v18"/><path d="M3 12h18"/><path d="M3 6h18"/><path d="M3 18h18"/></svg>
+                Ver Alteracoes
+            </button>
+
+            <div id="diffPreview" style="display:none;margin-bottom:12px;"></div>
+
             <button class="btn-execute" id="btnCreatePr">Criar Pull Request</button>
 
             <div class="output-area" id="output"></div>
@@ -611,6 +618,15 @@ export function getCreatePrHtml(state: CreatePrViewState): string {
         document.getElementById('baseBranch').addEventListener('change', () => {
             const base = document.getElementById('baseBranch').value;
             document.getElementById('prTitle').value = CURRENT_BRANCH + ' -> ' + base;
+        });
+
+        document.getElementById('btnPreviewDiff').addEventListener('click', () => {
+            const base = document.getElementById('baseBranch').value;
+            const btn = document.getElementById('btnPreviewDiff');
+            btn.dataset.originalText = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner"></span> Carregando...';
+            btn.disabled = true;
+            vscode.postMessage({ command: 'previewDiff', base });
         });
 
         document.getElementById('btnCreatePr').addEventListener('click', () => {
@@ -634,6 +650,59 @@ export function getCreatePrHtml(state: CreatePrViewState): string {
                 } else {
                     showOutput('<span class="error">\\u274c ' + esc(msg.error) + '</span>');
                 }
+            }
+            if (msg.command === 'diffPreviewResult') {
+                const btn = document.getElementById('btnPreviewDiff');
+                btn.innerHTML = btn.dataset.originalText || 'Ver Alteracoes';
+                btn.disabled = false;
+                const container = document.getElementById('diffPreview');
+                if (!msg.success) {
+                    container.style.display = 'block';
+                    container.innerHTML = '<div style="padding:12px;background:var(--vscode-inputValidation-errorBackground,#5a1d1d);border:1px solid var(--vscode-inputValidation-errorBorder,#be1100);border-radius:6px;font-size:13px;">' + esc(msg.error) + '</div>';
+                    return;
+                }
+                const data = msg.data;
+                let html = '';
+
+                // Commits section
+                if (data.commits && data.commits.length > 0) {
+                    html += '<div style="margin-bottom:12px;"><div style="font-weight:600;font-size:13px;margin-bottom:6px;color:var(--vscode-foreground);">Commits (' + data.commits.length + ')</div>';
+                    html += '<div style="background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border,var(--vscode-widget-border));border-radius:6px;overflow:hidden;">';
+                    data.commits.forEach(function(c) {
+                        html += '<div style="padding:6px 10px;border-bottom:1px solid var(--vscode-panel-border,var(--vscode-widget-border));font-size:12px;display:flex;gap:8px;align-items:center;">';
+                        html += '<code style="color:var(--vscode-textLink-foreground);font-size:11px;">' + esc(c.hash) + '</code>';
+                        html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(c.message) + '</span>';
+                        html += '<span style="color:var(--vscode-descriptionForeground);font-size:11px;white-space:nowrap;">' + esc(c.author) + '</span>';
+                        html += '</div>';
+                    });
+                    html += '</div></div>';
+                }
+
+                // Files section
+                if (data.files && data.files.length > 0) {
+                    let totalAdd = 0, totalDel = 0;
+                    data.files.forEach(function(f) { totalAdd += f.additions; totalDel += f.deletions; });
+                    html += '<div><div style="font-weight:600;font-size:13px;margin-bottom:6px;color:var(--vscode-foreground);">Arquivos alterados (' + data.files.length + ') &nbsp;<span style="color:#3fb950;font-size:12px;">+' + totalAdd + '</span> <span style="color:#f85149;font-size:12px;">-' + totalDel + '</span></div>';
+                    html += '<div style="background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border,var(--vscode-widget-border));border-radius:6px;overflow:hidden;">';
+                    data.files.forEach(function(f) {
+                        var statusLabel = f.status === 'A' ? 'A' : f.status === 'D' ? 'D' : f.status === 'R' ? 'R' : 'M';
+                        var statusColor = f.status === 'A' ? '#3fb950' : f.status === 'D' ? '#f85149' : f.status === 'R' ? '#d29922' : '#58a6ff';
+                        html += '<div style="padding:5px 10px;border-bottom:1px solid var(--vscode-panel-border,var(--vscode-widget-border));font-size:12px;display:flex;gap:8px;align-items:center;">';
+                        html += '<span style="background:' + statusColor + '22;color:' + statusColor + ';padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600;min-width:16px;text-align:center;">' + statusLabel + '</span>';
+                        html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--vscode-editor-font-family,monospace);">' + esc(f.file) + '</span>';
+                        html += '<span style="color:#3fb950;font-size:11px;">+' + f.additions + '</span>';
+                        html += '<span style="color:#f85149;font-size:11px;">-' + f.deletions + '</span>';
+                        html += '</div>';
+                    });
+                    html += '</div></div>';
+                }
+
+                if (!html) {
+                    html = '<div style="padding:12px;color:var(--vscode-descriptionForeground);font-size:13px;">Nenhuma alteracao encontrada entre as branches.</div>';
+                }
+
+                container.style.display = 'block';
+                container.innerHTML = html;
             }
         });
 
